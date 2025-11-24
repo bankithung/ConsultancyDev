@@ -1,0 +1,55 @@
+services:
+  # Django Backend
+  - type: web
+    name: consultancy-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn config.wsgi:application"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: consultancy-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: False
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+  # Next.js Frontend
+  - type: web
+    name: consultancy-frontend
+    runtime: node
+    rootDir: consultancy-dev
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+      - key: NEXT_PUBLIC_WS_URL
+        sync: false
+      - key: NEXT_PUBLIC_APP_URL
+        sync: false
+
+databases:
+  # PostgreSQL Database
+  - name: consultancy-db
+    databaseName: consultancy_db
+    user: consultancy_user
+    plan: free
+
+# Redis for Django Channels
+# Note: Redis is not available on free tier, you'll need to use external free Redis (e.g., Upstash)
+# Uncomment if you have a paid plan:
+# - type: redis
+#   name: consultancy-redis
+#   plan: free
+#   maxmemoryPolicy: noeviction
