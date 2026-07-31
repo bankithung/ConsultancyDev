@@ -6,20 +6,27 @@ import { useAuthStore } from '@/store/authStore';
 import { Toaster } from '@/components/ui/toaster';
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: {
-      queries: {
-        staleTime: 60 * 1000,
-        refetchInterval: 10000, // Auto-refresh every 10 seconds
-        refetchOnWindowFocus: true, // Refresh when window regains focus
-      },
-    },
-  }));
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 30 * 1000,
+            gcTime: 5 * 60 * 1000,
+            retry: 1,
+            // The previous 10s refetchInterval hammered every endpoint on every
+            // mounted query. Data is refreshed by explicit invalidation after
+            // mutations instead.
+            refetchOnWindowFocus: false,
+          },
+        },
+      })
+  );
 
-  const { checkAuth } = useAuthStore();
+  const checkAuth = useAuthStore((state) => state.checkAuth);
 
   useEffect(() => {
-    checkAuth();
+    void checkAuth();
   }, [checkAuth]);
 
   return (

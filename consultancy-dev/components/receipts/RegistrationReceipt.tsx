@@ -65,12 +65,12 @@ export function RegistrationReceipt({ data, onClose }: RegistrationReceiptProps)
                 <div className="receipt-container p-8 md:p-12">
                     {/* Header */}
                     <div className="text-center mb-8 border-b-2 border-gray-900 pb-6">
-                        <h1 className="text-3xl font-bold text-gray-900 mb-2">REGISTRATION RECEIPT</h1>
+                        <h1 className="text-2xl font-bold text-gray-900 mb-2">REGISTRATION RECEIPT</h1>
                         <p className="text-sm text-gray-600">Student Consultancy Services</p>
                     </div>
 
                     {/* Receipt Info Bar */}
-                    <div className="grid grid-cols-2 gap-4 mb-8 text-sm">
+                    <div className="grid grid-cols-1 gap-4 mb-8 text-sm sm:grid-cols-2 print:grid-cols-2">
                         <div>
                             <p className="text-gray-600">Receipt Number:</p>
                             <p className="font-mono font-bold text-gray-900">{data.registrationNo}</p>
@@ -84,7 +84,7 @@ export function RegistrationReceipt({ data, onClose }: RegistrationReceiptProps)
                     {/* Student Information */}
                     <div className="mb-6">
                         <h3 className="text-lg font-bold text-gray-900 mb-4 border-b border-gray-300 pb-2">Student Information</h3>
-                        <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                        <div className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2 print:grid-cols-2">
                             <div>
                                 <p className="text-gray-600">Student Name:</p>
                                 <p className="font-semibold text-gray-900">{data.studentName}</p>
@@ -109,7 +109,7 @@ export function RegistrationReceipt({ data, onClose }: RegistrationReceiptProps)
                     {/* Parent Information */}
                     <div className="mb-6">
                         <h3 className="text-lg font-bold text-gray-900 mb-4 border-b border-gray-300 pb-2">Parent/Guardian Information</h3>
-                        <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                        <div className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2 print:grid-cols-2">
                             <div>
                                 <p className="text-gray-600">Father's Name:</p>
                                 <p className="font-semibold text-gray-900">{data.fatherName}</p>
@@ -150,7 +150,7 @@ export function RegistrationReceipt({ data, onClose }: RegistrationReceiptProps)
                     {/* Payment Details */}
                     <div className="mb-8 bg-gray-50 p-6 rounded-lg border border-gray-200">
                         <h3 className="text-lg font-bold text-gray-900 mb-4">Payment Details</h3>
-                        <div className="grid grid-cols-2 gap-4 text-sm mb-4">
+                        <div className="grid grid-cols-1 gap-4 text-sm mb-4 sm:grid-cols-2 print:grid-cols-2">
                             <div>
                                 <p className="text-gray-600">Payment Method:</p>
                                 <p className="font-semibold text-gray-900">{data.paymentMethod}</p>
@@ -173,7 +173,7 @@ export function RegistrationReceipt({ data, onClose }: RegistrationReceiptProps)
 
                     {/* Footer */}
                     <div className="border-t-2 border-gray-900 pt-6 mt-8">
-                        <div className="grid grid-cols-2 gap-8 mb-6">
+                        <div className="grid grid-cols-1 gap-8 mb-6 sm:grid-cols-2 print:grid-cols-2">
                             <div>
                                 <p className="text-xs text-gray-600 mb-4">Terms & Conditions:</p>
                                 <ul className="text-xs text-gray-600 space-y-1">

@@ -1,168 +1,312 @@
 'use client';
 
 import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { format } from 'date-fns';
+import { CheckCircle, Clock, Package, Search, Send, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useQuery } from '@tanstack/react-query';
+import { PaginationBar } from '@/components/common/PaginationBar';
+import {
+    EmptyState,
+    ErrorBanner,
+    ErrorState,
+    InlineSpinner,
+    LoadingState,
+    SuccessBanner,
+} from '@/components/common/states';
 import { apiClient } from '@/lib/apiClient';
-import { Send, CheckCircle, Clock, Package, Search } from 'lucide-react';
-import { format } from 'date-fns';
+import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
+import { useDebounce } from '@/hooks/useDebounce';
+import { useAuth } from '@/hooks/useAuth';
+import type { Document, RecordTransfer } from '@/lib/types';
 
+const STATUS_STYLE: Record<RecordTransfer['status'], string> = {
+    PENDING: 'bg-yellow-100 text-yellow-700',
+    ACCEPTED: 'bg-green-100 text-green-700',
+    REJECTED: 'bg-red-100 text-red-700',
+    CANCELLED: 'bg-slate-200 text-slate-600',
+};
+
+/**
+ * Handing a document to a colleague goes through the same RecordTransfer
+ * mechanism as every other record type, so custody actually changes owner and
+ * the recipient sees it in their /app/transfers inbox.
+ *
+ * The two halves are divided by a rule rather than boxed in cards: this renders
+ * inside the documents panel, which is already the surface.
+ */
 export function DocumentTransfer() {
-    const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
-    const [receiver, setReceiver] = useState('');
-    const [searchTerm, setSearchTerm] = useState('');
-    const [pendingTransfers, setPendingTransfers] = useState<any[]>([
-        { id: 1, receiver: 'Mike Chen', sender: 'You', docCount: 3, status: 'Pending', date: new Date() }
-    ]);
+    const queryClient = useQueryClient();
+    const { user } = useAuth();
 
-    const { data: documents } = useQuery({
-        queryKey: ['documents-transfer'],
-        queryFn: apiClient.documents.list,
+    const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
+    const [receiverId, setReceiverId] = useState('');
+    const [note, setNote] = useState('');
+    const [searchInput, setSearchInput] = useState('');
+    const search = useDebounce(searchInput, 300);
+    const [sentCount, setSentCount] = useState(0);
+
+    // Only documents currently in custody can be handed over.
+    const documents = usePaginatedQuery<Document>(['documents-transfer'], apiClient.documents.list, {
+        pageSize: 50,
+        search,
+        ordering: '-uploaded_at',
+        filters: { status: 'IN' },
     });
 
-    const availableDocs = documents?.filter(d => d.status === 'IN' &&
-        (searchTerm === '' || d.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            d.studentName?.toLowerCase().includes(searchTerm.toLowerCase()))
-    ) || [];
+    const recipients = useQuery({
+        queryKey: ['transfer-recipients'],
+        queryFn: () => apiClient.users.list({ page_size: 200, ordering: 'first_name' }),
+        staleTime: 5 * 60_000,
+    });
 
-    const handleSend = () => {
-        if (selectedDocs.length === 0 || !receiver) return;
+    const history = usePaginatedQuery<RecordTransfer>(['transfers', 'documents'], apiClient.transfers.list, {
+        pageSize: 10,
+        ordering: '-created_at',
+        filters: { entity_type: 'document' },
+    });
 
-        const newTransfer = {
-            id: Date.now(),
-            receiver,
-            sender: 'You',
-            docCount: selectedDocs.length,
-            status: 'Pending',
-            date: new Date(),
-        };
+    const sendMutation = useMutation({
+        mutationFn: async () => {
+            if (!receiverId) throw new Error('Choose who should receive these documents.');
+            // One transfer per document: each is an independently owned record.
+            await Promise.all(
+                selectedDocs.map((documentId) =>
+                    apiClient.transfers.create({
+                        entity_type: 'document',
+                        entity_id: Number(documentId),
+                        to_user: Number(receiverId),
+                        note,
+                    }),
+                ),
+            );
+            return selectedDocs.length;
+        },
+        onSuccess: (count) => {
+            queryClient.invalidateQueries({ queryKey: ['transfers'] });
+            queryClient.invalidateQueries({ queryKey: ['documents'] });
+            setSentCount(count);
+            setSelectedDocs([]);
+            setReceiverId('');
+            setNote('');
+        },
+    });
 
-        setPendingTransfers([newTransfer, ...pendingTransfers]);
-        setSelectedDocs([]);
-        setReceiver('');
-        alert('Transfer Initiated Successfully!');
-    };
+    const availableRecipients = (recipients.data?.results ?? []).filter((candidate) => candidate.id !== user?.id);
 
-    const handleReceive = (id: number) => {
-        setPendingTransfers(prev => prev.map(t => t.id === id ? { ...t, status: 'Received' } : t));
+    const toggleDoc = (id: string, checked: boolean) => {
+        setSentCount(0);
+        setSelectedDocs((current) => (checked ? [...current, id] : current.filter((value) => value !== id)));
     };
 
     return (
-        <div className="space-y-6">
-            <div>
-                <h2 className="text-xl font-semibold text-slate-900">Document Transfer</h2>
-                <p className="text-sm text-slate-600 mt-1">Transfer documents between team members</p>
-            </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2">
+            <div className="space-y-4 border-b border-slate-100 p-3 sm:p-4 lg:border-b-0 lg:border-r">
+                <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    <Package size={14} className="text-teal-600" />
+                    New transfer
+                </h3>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Create Transfer */}
-                <div className="space-y-6">
-                    <Card className="border-slate-200">
-                        <CardHeader className="bg-gradient-to-r from-teal-50 to-white border-b border-slate-100">
-                            <CardTitle className="text-lg font-semibold font-heading flex items-center gap-2">
-                                <Package className="h-5 w-5 text-teal-600" />
-                                New Transfer
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="pt-6 space-y-4">
-                            <div className="space-y-2">
-                                <Label className="font-body font-medium">Select Receiver</Label>
-                                <Select onValueChange={setReceiver} value={receiver}>
-                                    <SelectTrigger className="h-11">
-                                        <SelectValue placeholder="Choose employee..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="Sarah Johnson">Sarah Johnson</SelectItem>
-                                        <SelectItem value="Mike Chen">Mike Chen</SelectItem>
-                                        <SelectItem value="Emily Davis">Emily Davis</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                {sendMutation.isError && <ErrorBanner error={sendMutation.error} />}
+                {sentCount > 0 && (
+                    <SuccessBanner
+                        message={`Sent ${sentCount} document${sentCount === 1 ? '' : 's'} for acceptance.`}
+                        onDismiss={() => setSentCount(0)}
+                    />
+                )}
 
-                            <div className="space-y-2">
-                                <Label className="font-body font-medium">Select Documents ({selectedDocs.length} selected)</Label>
-                                <div className="relative mb-2">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                                    <Input placeholder="Search documents..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 h-10" />
-                                </div>
-                                <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-lg bg-white custom-scrollbar">
-                                    {availableDocs.length === 0 ? (
-                                        <p className="text-sm text-slate-500 text-center py-8">No 'IN' documents available</p>
-                                    ) : (
-                                        <div className="p-2 space-y-1">
-                                            {availableDocs.map(doc => (
-                                                <div key={doc.id} className={`flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 transition-colors ${selectedDocs.includes(doc.id) ? 'bg-teal-50 border border-teal-200' : ''}`}>
-                                                    <Checkbox
-                                                        checked={selectedDocs.includes(doc.id)}
-                                                        onCheckedChange={(checked: boolean) => {
-                                                            if (checked) setSelectedDocs([...selectedDocs, doc.id]);
-                                                            else setSelectedDocs(selectedDocs.filter(id => id !== doc.id));
-                                                        }}
-                                                    />
-                                                    <div className="text-sm flex-1 min-w-0">
-                                                        <p className="font-semibold text-slate-900 truncate">{doc.fileName}</p>
-                                                        <p className="text-xs text-slate-500">{doc.studentName}</p>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            <Button className="w-full h-11 bg-teal-600 hover:bg-teal-700" onClick={handleSend} disabled={selectedDocs.length === 0 || !receiver}>
-                                <Send className="mr-2 h-4 w-4" /> Send Transfer
-                            </Button>
-                        </CardContent>
-                    </Card>
-                </div>
-
-                {/* Transfer History */}
-                <div className="space-y-4">
-                    <h2 className="text-lg font-bold text-slate-900 font-heading">Transfer History</h2>
-                    {pendingTransfers.length === 0 ? (
-                        <Card className="border-slate-200">
-                            <CardContent className="p-12 text-center">
-                                <Clock size={40} className="mx-auto mb-3 text-slate-300" />
-                                <p className="text-slate-500 font-body">No recent transfers</p>
-                            </CardContent>
-                        </Card>
-                    ) : (
-                        <div className="space-y-3">
-                            {pendingTransfers.map((t) => (
-                                <Card key={t.id} className="border-slate-200 hover:shadow-md transition-shadow">
-                                    <CardContent className="p-5">
-                                        <div className="flex items-start justify-between gap-4">
-                                            <div className="flex-1">
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    <p className="font-semibold text-slate-900 font-heading">To: {t.receiver}</p>
-                                                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${t.status === 'Pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
-                                                        }`}>
-                                                        {t.status}
-                                                    </span>
-                                                </div>
-                                                <p className="text-sm text-slate-600 font-body">{t.docCount} Documents</p>
-                                                <p className="text-xs text-slate-400 mt-1">{format(t.date, 'dd MMM yyyy, HH:mm')}</p>
-                                            </div>
-                                            {t.status === 'Pending' ? (
-                                                <Button size="sm" variant="outline" onClick={() => handleReceive(t.id)} className="shrink-0">
-                                                    Mark Received
-                                                </Button>
-                                            ) : (
-                                                <CheckCircle size={20} className="text-green-600 shrink-0" />
-                                            )}
-                                        </div>
-                                    </CardContent>
-                                </Card>
+                <div className="space-y-2">
+                    <Label htmlFor="transfer-receiver" className="font-medium font-body">
+                        Send to
+                    </Label>
+                    <Select value={receiverId} onValueChange={setReceiverId}>
+                        <SelectTrigger id="transfer-receiver" className="h-10">
+                            <SelectValue placeholder={recipients.isLoading ? 'Loading…' : 'Choose a colleague…'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {availableRecipients.map((candidate) => (
+                                <SelectItem key={candidate.id} value={String(candidate.id)}>
+                                    {candidate.full_name || candidate.username}
+                                    {candidate.branch_name ? ` · ${candidate.branch_name}` : ''}
+                                </SelectItem>
                             ))}
-                        </div>
+                        </SelectContent>
+                    </Select>
+                    {recipients.isError && <ErrorBanner error={recipients.error} />}
+                    {!recipients.isLoading && availableRecipients.length === 0 && (
+                        <p className="text-xs text-slate-500">
+                            There is nobody else in your company to transfer to yet.
+                        </p>
                     )}
                 </div>
+
+                <div className="space-y-2">
+                    <Label className="font-medium font-body">Documents ({selectedDocs.length} selected)</Label>
+                    <div className="relative mb-2">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input
+                            placeholder="Search documents…"
+                            aria-label="Search documents to transfer"
+                            value={searchInput}
+                            onChange={(e) => setSearchInput(e.target.value)}
+                            className="h-10 pl-10"
+                        />
+                    </div>
+
+                    <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                        {documents.isError ? (
+                            <div className="p-3">
+                                <ErrorState error={documents.error} onRetry={documents.refetch} />
+                            </div>
+                        ) : documents.isLoading ? (
+                            <div className="p-3">
+                                <LoadingState rows={3} label="Loading documents" />
+                            </div>
+                        ) : documents.rows.length === 0 ? (
+                            <p className="py-8 text-center text-sm text-slate-500">
+                                No documents in custody to transfer
+                            </p>
+                        ) : (
+                            <div className="space-y-1 p-2">
+                                {documents.rows.map((doc) => (
+                                    <label
+                                        key={doc.id}
+                                        className={`flex cursor-pointer items-center gap-3 rounded-lg p-3 transition-colors hover:bg-slate-50 ${
+                                            selectedDocs.includes(doc.id) ? 'border border-teal-200 bg-teal-50' : ''
+                                        }`}
+                                    >
+                                        <Checkbox
+                                            checked={selectedDocs.includes(doc.id)}
+                                            onCheckedChange={(checked) => toggleDoc(doc.id, checked === true)}
+                                        />
+                                        <span className="min-w-0 flex-1 text-sm">
+                                            <span className="block truncate font-semibold text-slate-900">
+                                                {doc.fileName}
+                                            </span>
+                                            <span className="block truncate text-xs text-slate-500">
+                                                {doc.studentName || 'Unassigned'} · {doc.type}
+                                            </span>
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="space-y-2">
+                    <Label htmlFor="transfer-note" className="font-medium font-body">
+                        Note <span className="font-normal text-slate-400">(optional)</span>
+                    </Label>
+                    <textarea
+                        id="transfer-note"
+                        rows={2}
+                        className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        placeholder="Why are you handing these over?"
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                    />
+                </div>
+
+                <Button
+                    className="h-10 w-full bg-teal-600 hover:bg-teal-700"
+                    onClick={() => sendMutation.mutate()}
+                    disabled={selectedDocs.length === 0 || !receiverId || sendMutation.isPending}
+                >
+                    {sendMutation.isPending ? (
+                        <>
+                            <InlineSpinner className="mr-2" /> Sending…
+                        </>
+                    ) : (
+                        <>
+                            <Send className="mr-2 h-4 w-4" /> Send transfer
+                        </>
+                    )}
+                </Button>
+            </div>
+
+            <div className="space-y-3 p-3 sm:p-4">
+                <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    <Clock size={14} className="text-slate-400" />
+                    Transfer history
+                </h3>
+
+                {history.isError ? (
+                    <ErrorState error={history.error} onRetry={history.refetch} />
+                ) : history.isLoading ? (
+                    <LoadingState rows={3} label="Loading transfer history" />
+                ) : history.rows.length === 0 ? (
+                    <EmptyState
+                        icon={Clock}
+                        title="No document transfers yet"
+                        description="Transfers you send or receive appear here."
+                    />
+                ) : (
+                    <div className="space-y-2">
+                        {history.rows.map((transfer) => {
+                            const outgoing = transfer.from_user === user?.id;
+                            return (
+                                <div
+                                    key={transfer.id}
+                                    className="rounded-lg border border-slate-200 p-3 transition-colors hover:bg-slate-50"
+                                >
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                                                <p className="font-semibold text-slate-900 font-heading">
+                                                    {outgoing
+                                                        ? `To: ${transfer.to_user_name}`
+                                                        : `From: ${transfer.from_user_name}`}
+                                                </p>
+                                                <span
+                                                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[transfer.status]}`}
+                                                >
+                                                    {transfer.status}
+                                                </span>
+                                            </div>
+                                            <p className="break-words text-sm text-slate-600 font-body">
+                                                {transfer.entity_label || `Document #${transfer.entity_id}`}
+                                            </p>
+                                            {transfer.note && (
+                                                <p className="mt-1 break-words text-xs text-slate-500">
+                                                    “{transfer.note}”
+                                                </p>
+                                            )}
+                                            <p className="mt-1 text-xs text-slate-400">
+                                                {format(new Date(transfer.created_at), 'dd MMM yyyy, HH:mm')}
+                                            </p>
+                                        </div>
+
+                                        <div className="shrink-0">
+                                            {transfer.status === 'ACCEPTED' && (
+                                                <CheckCircle size={20} className="text-green-600" />
+                                            )}
+                                            {transfer.status === 'REJECTED' && (
+                                                <XCircle size={20} className="text-red-600" />
+                                            )}
+                                            {transfer.status === 'PENDING' && (
+                                                <Clock size={20} className="text-yellow-600" />
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+
+                        <PaginationBar
+                            page={history.page}
+                            pages={history.pages}
+                            count={history.count}
+                            pageSize={history.pageSize}
+                            onPageChange={history.setPage}
+                            isLoading={history.isFetching}
+                        />
+                    </div>
+                )}
             </div>
         </div>
     );

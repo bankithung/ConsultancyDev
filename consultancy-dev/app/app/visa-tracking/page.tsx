@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
+import type { VisaTracking } from '@/lib/types';
+import { toast } from '@/store/toastStore';
+import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,34 +15,36 @@ import { Plane, FileText, CheckCircle, Clock, AlertCircle, Plus, Search, X } fro
 import { format } from 'date-fns';
 import * as Dialog from '@radix-ui/react-dialog';
 
-interface VisaApplication {
-  id: string;
-  studentName: string;
-  passportNo: string;
-  country: string;
-  visaType: string;
-  appliedDate: string;
-  currentStage: 'Document Preparation' | 'Application Submitted' | 'Interview Scheduled' | 'Under Review' | 'Approved' | 'Rejected';
-  interviewDate?: string;
-  expectedDecision?: string;
-  officer?: string;
-  notes?: string;
-}
+import { toArray } from '@/components/common/pagination';
 
-const VISA_STAGES = [
-  'Document Preparation',
-  'Application Submitted',
-  'Interview Scheduled',
-  'Under Review',
-  'Approved',
-  'Rejected'
+/**
+ * Stage values MUST match the backend's VisaTracking.STAGE_CHOICES exactly.
+ *
+ * The page previously used its own labels ('Document Preparation',
+ * 'Application Submitted', 'Under Review'), none of which the API recognises —
+ * so the stage filter silently matched nothing and every new record was
+ * created with an invalid stage. Value is what the server stores; label is
+ * what the user reads.
+ */
+const VISA_STAGES: { value: string; label: string }[] = [
+  { value: 'Documents', label: 'Document preparation' },
+  { value: 'Applied', label: 'Application submitted' },
+  { value: 'Biometrics', label: 'Biometrics' },
+  { value: 'Interview', label: 'Interview' },
+  { value: 'Decision', label: 'Awaiting decision' },
+  { value: 'Approved', label: 'Approved' },
+  { value: 'Rejected', label: 'Rejected' },
 ];
+
+const STAGE_LABELS: Record<string, string> = Object.fromEntries(
+  VISA_STAGES.map((s) => [s.value, s.label]),
+);
 
 export default function VisaTrackingPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStage, setFilterStage] = useState('all');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [selectedVisa, setSelectedVisa] = useState<VisaApplication | null>(null);
+  const [selectedVisa, setSelectedVisa] = useState<VisaTracking | null>(null);
 
   // Form State
   const [studentName, setStudentName] = useState('');
@@ -47,14 +52,24 @@ export default function VisaTrackingPage() {
   const [country, setCountry] = useState('');
   const [visaType, setVisaType] = useState('Student Visa');
   const [appliedDate, setAppliedDate] = useState('');
-  const [currentStage, setCurrentStage] = useState('Document Preparation');
+  const [currentStage, setCurrentStage] = useState('Documents');
   const [notes, setNotes] = useState('');
 
   const queryClient = useQueryClient();
 
-  const { data: visaApplications = [], isLoading } = useQuery({
-    queryKey: ['visaTracking'],
-    queryFn: apiClient.visaTracking.list,
+  const visaQuery = usePaginatedQuery<VisaTracking>(['visaTracking'], apiClient.visaTracking.list, {
+    // The stage board groups every application, so load them in one page.
+    pageSize: 200,
+    ordering: '-applied_date',
+  });
+  const visaApplications = visaQuery.rows;
+  const isLoading = visaQuery.isLoading;
+
+  // Stage totals across every application in scope, computed server-side.
+  const pipelineQuery = useQuery({
+    queryKey: ['analytics', 'visa-pipeline'],
+    queryFn: apiClient.analytics.getVisaPipeline,
+    staleTime: 60_000,
   });
 
   const createVisaMutation = useMutation({
@@ -63,7 +78,7 @@ export default function VisaTrackingPage() {
       queryClient.invalidateQueries({ queryKey: ['visaTracking'] });
       setIsCreateOpen(false);
       resetForm();
-      alert('Visa application created successfully!');
+      toast.success('Visa application created');
     },
   });
 
@@ -73,7 +88,7 @@ export default function VisaTrackingPage() {
     setCountry('');
     setVisaType('Student Visa');
     setAppliedDate('');
-    setCurrentStage('Document Preparation');
+    setCurrentStage('Documents');
     setNotes('');
   };
 
@@ -85,8 +100,8 @@ export default function VisaTrackingPage() {
       country,
       visaType,
       appliedDate,
-      currentStage: currentStage as any,
-      notes,
+      currentStage,
+      status: 'In Progress',
     });
   };
 
@@ -98,16 +113,19 @@ export default function VisaTrackingPage() {
     );
   }
 
-  const filteredVisas = visaApplications.filter((visa: VisaApplication) => {
+  const filteredVisas = visaApplications.filter((visa: VisaTracking) => {
     const matchesSearch = visa.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       visa.passportNo.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStage = filterStage === 'all' || visa.currentStage === filterStage;
     return matchesSearch && matchesStage;
   });
 
-  const pendingCount = visaApplications.filter((v: VisaApplication) => !['Approved', 'Rejected'].includes(v.currentStage)).length;
-  const approvedCount = visaApplications.filter((v: VisaApplication) => v.currentStage === 'Approved').length;
-  const rejectedCount = visaApplications.filter((v: VisaApplication) => v.currentStage === 'Rejected').length;
+  // Full-scope figures from the server; the board below shows the loaded page.
+  const stageCounts = new Map((pipelineQuery.data?.pipeline ?? []).map((s) => [s.stage, s.count]));
+  const approvedCount = stageCounts.get('Approved') ?? 0;
+  const rejectedCount = stageCounts.get('Rejected') ?? 0;
+  const totalTracked = pipelineQuery.data?.total ?? 0;
+  const pendingCount = Math.max(totalTracked - approvedCount - rejectedCount, 0);
   const totalCompleted = approvedCount + rejectedCount;
   const successRate = totalCompleted > 0 ? Math.round((approvedCount / totalCompleted) * 100) : 0;
 
@@ -115,7 +133,7 @@ export default function VisaTrackingPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-heading">Visa Application Tracking</h1>
+          <h1 className="text-2xl font-bold text-slate-900 font-heading">Visa Application Tracking</h1>
           <p className="text-sm text-slate-600 mt-1 font-body">Monitor visa application status and stages</p>
         </div>
         <Button onClick={() => setIsCreateOpen(true)} className="h-9 bg-teal-600 hover:bg-teal-700 font-body">
@@ -130,7 +148,7 @@ export default function VisaTrackingPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-600 font-body">In Progress</p>
-                <h3 className="text-3xl font-bold text-yellow-600 font-heading">{pendingCount}</h3>
+                <h3 className="text-2xl font-bold text-yellow-600 font-heading">{pendingCount}</h3>
               </div>
               <Clock className="h-10 w-10 text-yellow-600" />
             </div>
@@ -142,7 +160,7 @@ export default function VisaTrackingPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-600 font-body">Approved</p>
-                <h3 className="text-3xl font-bold text-green-600 font-heading">{approvedCount}</h3>
+                <h3 className="text-2xl font-bold text-green-600 font-heading">{approvedCount}</h3>
               </div>
               <CheckCircle className="h-10 w-10 text-green-600" />
             </div>
@@ -154,7 +172,7 @@ export default function VisaTrackingPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-600 font-body">Success Rate</p>
-                <h3 className="text-3xl font-bold text-teal-600 font-heading">{successRate}%</h3>
+                <h3 className="text-2xl font-bold text-teal-600 font-heading">{successRate}%</h3>
               </div>
               <Plane className="h-10 w-10 text-teal-600" />
             </div>
@@ -174,8 +192,8 @@ export default function VisaTrackingPage() {
               <SelectTrigger className="h-10 bg-white"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Stages</SelectItem>
-                {VISA_STAGES.map(stage => (
-                  <SelectItem key={stage} value={stage}>{stage}</SelectItem>
+                {VISA_STAGES.map(({ value, label }) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -188,7 +206,7 @@ export default function VisaTrackingPage() {
 
       {/* Applications List */}
       <div className="space-y-4">
-        {filteredVisas.map((visa: VisaApplication) => (
+        {filteredVisas.map((visa: VisaTracking) => (
           <Card key={visa.id} className="border-slate-200 hover:shadow-md transition-shadow cursor-pointer" onClick={() => setSelectedVisa(visa)}>
             <CardContent className="p-6">
               <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
@@ -212,7 +230,7 @@ export default function VisaTrackingPage() {
                       visa.currentStage === 'Interview Scheduled' ? 'bg-yellow-100 text-yellow-700' :
                         'bg-blue-100 text-blue-700'
                     }`}>
-                    {visa.currentStage}
+                    {STAGE_LABELS[visa.currentStage] ?? visa.currentStage}
                   </span>
                   {visa.interviewDate && (
                     <p className="text-xs text-slate-600 font-body">Interview: {format(new Date(visa.interviewDate), 'dd MMM')}</p>
@@ -223,12 +241,12 @@ export default function VisaTrackingPage() {
               {/* Progress Bar */}
               <div className="mt-6">
                 <div className="flex justify-between text-xs text-slate-600 mb-2 font-body">
-                  {VISA_STAGES.slice(0, 5).map((stage, i) => {
-                    const currentIndex = VISA_STAGES.indexOf(visa.currentStage);
+                  {VISA_STAGES.slice(0, 5).map(({ value, label }, i) => {
+                    const currentIndex = VISA_STAGES.findIndex((s) => s.value === visa.currentStage);
                     const isCompleted = i <= currentIndex;
                     return (
-                      <span key={stage} className={`${isCompleted ? 'text-teal-600 font-semibold' : ''}`}>
-                        {stage.split(' ')[0]}
+                      <span key={value} className={`${isCompleted ? 'text-teal-600 font-semibold' : ''}`}>
+                        {label.split(' ')[0]}
                       </span>
                     );
                   })}
@@ -236,7 +254,7 @@ export default function VisaTrackingPage() {
                 <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-teal-600 rounded-full transition-all"
-                    style={{ width: `${(VISA_STAGES.indexOf(visa.currentStage) / (VISA_STAGES.length - 1)) * 100}%` }}
+                    style={{ width: `${(Math.max(VISA_STAGES.findIndex((s) => s.value === visa.currentStage), 0) / (VISA_STAGES.length - 1)) * 100}%` }}
                   />
                 </div>
               </div>
@@ -262,7 +280,7 @@ export default function VisaTrackingPage() {
                   required
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="font-body">Passport No</Label>
                   <Input
@@ -284,7 +302,7 @@ export default function VisaTrackingPage() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="font-body">Visa Type</Label>
                   <Select value={visaType} onValueChange={setVisaType}>
@@ -312,8 +330,8 @@ export default function VisaTrackingPage() {
                 <Select value={currentStage} onValueChange={setCurrentStage}>
                   <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {VISA_STAGES.map(stage => (
-                      <SelectItem key={stage} value={stage}>{stage}</SelectItem>
+                    {VISA_STAGES.map(({ value, label }) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

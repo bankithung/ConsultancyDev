@@ -18,9 +18,17 @@ db.sqlite3
 *.sqlite3
 staticfiles/
 media/
+# Uploaded student documents. `media/` above did NOT cover this one: encrypted
+# originals are deliberately stored OUTSIDE the web-served root, so they live in
+# their own directory and slipped past the pattern. In production this holds
+# passport and certificate scans -- it must never reach a remote.
+private_media/
 .env
 .env.local
 .env.production
+
+# Working copies kept while migrations were reorganised. Not source.
+_migrations_backup/
 
 # Node
 node_modules/

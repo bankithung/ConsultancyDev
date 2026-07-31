@@ -3,6 +3,20 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
+import type { ApprovalRequest } from '@/lib/types';
+
+/**
+ * `ApprovalRequest.Status` on the backend is PENDING/APPROVED/REJECTED/FAILED
+ * (core/models.py:813-817), but lib/types declares it title-case. Comparing
+ * against the wire value through this alias keeps the runtime correct until
+ * lib/types is corrected — fe-infra has been told.
+ */
+type WireApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'FAILED';
+
+const wireStatus = (request: { status: string }): WireApprovalStatus =>
+  request.status as WireApprovalStatus;
+
+import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
 import { useAuthStore } from '@/store/authStore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -31,10 +45,13 @@ export default function ApprovalRequestsPage() {
         );
     }
 
-    const { data: requests, isLoading } = useQuery({
-        queryKey: ['approval-requests'],
-        queryFn: apiClient.approvalRequests.list,
-    });
+    const requestsQuery = usePaginatedQuery<ApprovalRequest>(
+        ['approval-requests'],
+        apiClient.approvalRequests.list,
+        { pageSize: 100, ordering: '-created_at' },
+    );
+    const requests = requestsQuery.rows;
+    const isLoading = requestsQuery.isLoading;
 
     const approveMutation = useMutation({
         mutationFn: async ({ id, note }: { id: number; note: string }) => {
@@ -94,8 +111,8 @@ export default function ApprovalRequestsPage() {
         setReviewNote('');
     };
 
-    const pendingRequests = requests?.filter((r: any) => r.status === 'PENDING') || [];
-    const historyRequests = requests?.filter((r: any) => r.status !== 'PENDING') || [];
+    const pendingRequests = requests.filter((request) => wireStatus(request) === 'PENDING');
+    const historyRequests = requests.filter((request) => wireStatus(request) !== 'PENDING');
 
     if (isLoading) {
         return <div className="flex items-center justify-center min-h-screen"><div className="animate-pulse text-slate-500">Loading requests...</div></div>;
@@ -104,12 +121,12 @@ export default function ApprovalRequestsPage() {
     return (
         <div className="space-y-6">
             <div>
-                <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-heading">Approval Requests</h1>
+                <h1 className="text-2xl font-bold text-slate-900 font-heading">Approval Requests</h1>
                 <p className="text-sm text-slate-600 mt-1 font-body">Review and manage delete/update requests from employees</p>
             </div>
 
             <Tabs defaultValue="pending" className="w-full">
-                <TabsList className="grid w-full max-w-md grid-cols-2">
+                <TabsList className="grid w-full max-w-md grid-cols-2 h-auto">
                     <TabsTrigger value="pending" className="relative">
                         Pending
                         {pendingRequests.length > 0 && (
@@ -227,8 +244,8 @@ function RequestCard({ request, onApprove, onReject, isHistory }: any) {
     const isDelete = request.action === 'DELETE';
 
     return (
-        <Card className={`border-l-4 ${request.status === 'APPROVED' ? 'border-l-green-500' :
-            request.status === 'REJECTED' ? 'border-l-red-500' :
+        <Card className={`border-l-4 ${wireStatus(request) === 'APPROVED' ? 'border-l-green-500' :
+            wireStatus(request) === 'REJECTED' ? 'border-l-red-500' :
                 isDelete ? 'border-l-red-500' : 'border-l-blue-500'
             }`}>
             <CardContent className="p-5">
@@ -243,7 +260,7 @@ function RequestCard({ request, onApprove, onReject, isHistory }: any) {
                                 {request.entity_type}
                             </span>
                             {isHistory && (
-                                <Badge variant={request.status === 'APPROVED' ? 'default' : 'destructive'} className={request.status === 'APPROVED' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}>
+                                <Badge variant={wireStatus(request) === 'APPROVED' ? 'default' : 'destructive'} className={wireStatus(request) === 'APPROVED' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}>
                                     {request.status}
                                 </Badge>
                             )}

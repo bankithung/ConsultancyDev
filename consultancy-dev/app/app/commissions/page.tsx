@@ -11,30 +11,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DollarSign, Users, TrendingUp, Download, Plus, Eye, X, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import * as Dialog from '@radix-ui/react-dialog';
+import { toArray } from '@/components/common/pagination';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { toast } from '@/store/toastStore';
+import { fetchAllPages } from '@/lib/apiClient';
+import type { Agent, Commission } from '@/lib/types';
 
-interface Agent {
-  id: string;
-  name: string;
-  email: string;
-  commissionType: 'Percentage' | 'Flat';
-  commissionValue: number;
-  totalEarned: number;
-  pendingAmount: number;
-  studentsReferred: number;
-  status: 'Active' | 'Inactive';
-}
-
-interface Commission {
-  id: string;
-  agentId: string;
-  agentName: string;
-  studentName: string;
-  enrollmentNo: string;
-  enrollmentFee: number;
-  commissionAmount: number;
-  status: 'Pending' | 'Paid';
-  enrollmentDate: string;
-}
+// Types come from lib/types so the page and the API client cannot drift. The
+// local duplicates that used to live here had already diverged — they declared
+// commissionType as 'Flat' where the API uses 'Fixed'.
 
 export default function CommissionsPage() {
   const [isAddAgentOpen, setIsAddAgentOpen] = useState(false);
@@ -43,19 +28,40 @@ export default function CommissionsPage() {
   // Form State
   const [agentName, setAgentName] = useState('');
   const [agentEmail, setAgentEmail] = useState('');
-  const [commissionType, setCommissionType] = useState<'Percentage' | 'Flat'>('Percentage');
+  const [commissionType, setCommissionType] = useState<'Percentage' | 'Fixed'>('Percentage');
   const [commissionValue, setCommissionValue] = useState('');
+  const [payTarget, setPayTarget] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
 
-  const { data: agents = [], isLoading: agentsLoading } = useQuery<Agent[]>({
+  // queryFn must be a thunk: react-query calls it with its own context object,
+  // not the PageParams these client methods expect.
+  const { data: agentsPage, isLoading: agentsLoading } = useQuery({
     queryKey: ['agents'],
-    queryFn: apiClient.agents.list,
+    queryFn: () => apiClient.agents.list(),
   });
 
-  const { data: commissions = [], isLoading: commissionsLoading } = useQuery<Commission[]>({
+  const { data: commissionsPage, isLoading: commissionsLoading } = useQuery({
     queryKey: ['commissions'],
-    queryFn: apiClient.commissions.list,
+    queryFn: () => apiClient.commissions.list(),
+  });
+
+  const agents = toArray<Agent>(agentsPage);
+  const commissions = toArray<Commission>(commissionsPage);
+
+  // The cards below are money and headcount, so they must cover every row in
+  // the caller's scope — reducing over the 25-row page would understate a
+  // payout figure without looking wrong. `fetchAllPages` is bounded internally.
+  const { data: allCommissions = [], isLoading: totalsLoading } = useQuery({
+    queryKey: ['commissions', 'all'],
+    queryFn: () => fetchAllPages<Commission, Commission>('commissions/', (row) => row),
+    staleTime: 60_000,
+  });
+
+  const { data: allAgents = [] } = useQuery({
+    queryKey: ['agents', 'all'],
+    queryFn: () => fetchAllPages<Agent, Agent>('agents/', (row) => row),
+    staleTime: 60_000,
   });
 
   const createAgentMutation = useMutation({
@@ -64,7 +70,7 @@ export default function CommissionsPage() {
       queryClient.invalidateQueries({ queryKey: ['agents'] });
       setIsAddAgentOpen(false);
       resetForm();
-      alert('Agent added successfully!');
+      toast.success('Agent added');
     },
   });
 
@@ -97,9 +103,7 @@ export default function CommissionsPage() {
   };
 
   const handlePayCommission = (id: string) => {
-    if (confirm('Mark this commission as paid?')) {
-      updateCommissionMutation.mutate({ id, data: { status: 'Paid' } });
-    }
+    setPayTarget(id);
   };
 
   if (agentsLoading || commissionsLoading) {
@@ -110,19 +114,59 @@ export default function CommissionsPage() {
     );
   }
 
-  const totalPending = commissions.filter((c: Commission) => c.status === 'Pending').reduce((sum: number, c: Commission) => sum + c.commissionAmount, 0);
-  const totalPaid = commissions.filter((c: Commission) => c.status === 'Paid').reduce((sum: number, c: Commission) => sum + c.commissionAmount, 0);
+  const totalPending = allCommissions
+    .filter((c) => c.status === 'Pending')
+    .reduce((sum, c) => sum + c.commissionAmount, 0);
+  const totalPaid = allCommissions
+    .filter((c) => c.status === 'Paid')
+    .reduce((sum, c) => sum + c.commissionAmount, 0);
+  const activeAgentCount = allAgents.filter((a) => a.status === 'Active').length;
+
+  const formatMoney = (value: number) =>
+    new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0,
+    }).format(value);
+
+  /** Exports every commission in scope as CSV. */
+  const handleExport = () => {
+    const header = ['Agent', 'Student', 'Enrollment', 'Enrollment fee', 'Commission', 'Status', 'Date'];
+    const escape = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+    const rows = allCommissions.map((c) =>
+      [c.agentName, c.studentName, c.enrollmentNo, c.enrollmentFee, c.commissionAmount, c.status, c.enrollmentDate]
+        .map(escape)
+        .join(','),
+    );
+    const blob = new Blob([[header.map(escape).join(','), ...rows].join('\n')], {
+      type: 'text/csv;charset=utf-8;',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `commissions-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-heading">Commission Management</h1>
+          <h1 className="text-2xl font-bold text-slate-900 font-heading">Commission Management</h1>
           <p className="text-sm text-slate-600 mt-1 font-body">Track and manage partner/agent commissions</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="h-9 font-body">
-            <Download size={16} className="mr-2" /> Export Report
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 font-body"
+            onClick={handleExport}
+            disabled={totalsLoading || allCommissions.length === 0}
+          >
+            <Download size={16} className="mr-2" /> Export CSV
           </Button>
           <Button onClick={() => setIsAddAgentOpen(true)} className="h-9 bg-teal-600 hover:bg-teal-700 font-body">
             <Plus className="mr-2 h-4 w-4" /> Add Agent
@@ -137,7 +181,7 @@ export default function CommissionsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-600 font-body">Pending Payout</p>
-                <h3 className="text-3xl font-bold text-yellow-600 font-heading">₹{(totalPending / 1000).toFixed(0)}K</h3>
+                <h3 className="text-2xl font-bold text-yellow-600 font-heading">{formatMoney(totalPending)}</h3>
               </div>
               <DollarSign className="h-10 w-10 text-yellow-600" />
             </div>
@@ -149,7 +193,7 @@ export default function CommissionsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-600 font-body">Total Paid</p>
-                <h3 className="text-3xl font-bold text-green-600 font-heading">₹{(totalPaid / 1000).toFixed(0)}K</h3>
+                <h3 className="text-2xl font-bold text-green-600 font-heading">{formatMoney(totalPaid)}</h3>
               </div>
               <CheckCircle className="h-10 w-10 text-green-600" />
             </div>
@@ -161,7 +205,7 @@ export default function CommissionsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-600 font-body">Active Agents</p>
-                <h3 className="text-3xl font-bold text-blue-600 font-heading">{agents.filter((a: Agent) => a.status === 'Active').length}</h3>
+                <h3 className="text-2xl font-bold text-blue-600 font-heading">{activeAgentCount}</h3>
               </div>
               <Users className="h-10 w-10 text-blue-600" />
             </div>
@@ -289,7 +333,7 @@ export default function CommissionsPage() {
                   <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Percentage">Percentage (%)</SelectItem>
-                    <SelectItem value="Flat">Flat Amount (₹)</SelectItem>
+                    <SelectItem value="Fixed">Flat Amount (₹)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -319,6 +363,18 @@ export default function CommissionsPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+      <ConfirmDialog
+        open={payTarget !== null}
+        onClose={() => setPayTarget(null)}
+        onConfirm={() => {
+          if (payTarget) updateCommissionMutation.mutate({ id: payTarget, data: { status: 'Paid' } });
+          setPayTarget(null);
+        }}
+        title="Mark commission as paid?"
+        description="This records the payout as settled. It does not move any money."
+        confirmText="Mark as paid"
+        isLoading={updateCommissionMutation.isPending}
+      />
     </div>
   );
 }

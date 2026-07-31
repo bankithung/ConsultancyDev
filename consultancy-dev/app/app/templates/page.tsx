@@ -3,6 +3,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
+import type { Template } from '@/lib/types';
+import { toast } from '@/store/toastStore';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,15 +15,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Mail, MessageSquare, Plus, Edit, Trash2, Send, Eye, X, Copy } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
 
-interface Template {
-  id: string;
-  name: string;
-  type: 'Email' | 'SMS' | 'WhatsApp';
-  subject?: string;
-  body: string;
-  category: 'Welcome' | 'Follow-up' | 'Document Request' | 'Payment Reminder' | 'Other';
-  usageCount: number;
-}
 
 export default function TemplatesPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -33,13 +28,16 @@ export default function TemplatesPage() {
   const [newCategory, setNewCategory] = useState<'Welcome' | 'Follow-up' | 'Document Request' | 'Payment Reminder' | 'Other'>('Follow-up');
   const [newSubject, setNewSubject] = useState('');
   const [newBody, setNewBody] = useState('');
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
 
-  const { data: templates = [], isLoading } = useQuery<Template[]>({
-    queryKey: ['templates'],
-    queryFn: apiClient.templates.list,
+  const templatesQuery = usePaginatedQuery(['templates'], apiClient.templates.list, {
+    ordering: 'name',
+    filters: filterType === 'all' ? undefined : { type: filterType },
   });
+  const templates = templatesQuery.rows;
+  const isLoading = templatesQuery.isLoading;
 
   const createTemplateMutation = useMutation({
     mutationFn: apiClient.templates.create,
@@ -47,7 +45,7 @@ export default function TemplatesPage() {
       queryClient.invalidateQueries({ queryKey: ['templates'] });
       setIsCreateOpen(false);
       resetForm();
-      alert('Template created successfully!');
+      toast.success('Template created');
     },
   });
 
@@ -71,16 +69,15 @@ export default function TemplatesPage() {
     createTemplateMutation.mutate({
       name: newName,
       type: newType,
-      category: newCategory,
-      subject: newType === 'Email' ? newSubject : undefined,
+      // Only email templates carry a subject line.
+      subject: newType === 'Email' ? newSubject : '',
       body: newBody,
+      isActive: true,
     });
   };
 
   const handleDelete = (id: string) => {
-    if (confirm('Are you sure you want to delete this template?')) {
-      deleteTemplateMutation.mutate(id);
-    }
+    setDeleteId(id);
   };
 
   if (isLoading) {
@@ -91,22 +88,23 @@ export default function TemplatesPage() {
     );
   }
 
-  const filteredTemplates = templates.filter((t: Template) => filterType === 'all' || t.type === filterType);
+  // `type` is filtered server-side through the query above.
+  const filteredTemplates = templates;
 
-  const handleCopy = (template: Template) => {
-    navigator.clipboard.writeText(template.body);
-    alert('Template copied to clipboard!');
-  };
-
-  const handleSendTest = (template: Template) => {
-    alert(`Test ${template.type.toLowerCase()} sent!`);
+  const handleCopy = async (template: Template) => {
+    try {
+      await navigator.clipboard.writeText(template.body);
+      toast.success('Template copied to clipboard');
+    } catch {
+      toast.error('Could not copy', 'Your browser blocked clipboard access.');
+    }
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-heading">Message Templates</h1>
+          <h1 className="text-2xl font-bold text-slate-900 font-heading">Message Templates</h1>
           <p className="text-sm text-slate-600 mt-1 font-body">Create and manage Email/SMS/WhatsApp templates</p>
         </div>
         <Button onClick={() => setIsCreateOpen(true)} className="h-9 bg-teal-600 hover:bg-teal-700 font-body">
@@ -159,7 +157,6 @@ export default function TemplatesPage() {
               <p className="text-sm text-slate-600 line-clamp-3 mb-4 font-body whitespace-pre-wrap">{template.body}</p>
 
               <div className="flex items-center justify-between text-xs text-slate-500 mb-4 font-body">
-                <span>{template.category}</span>
                 <span>{template.usageCount} uses</span>
               </div>
 
@@ -199,7 +196,7 @@ export default function TemplatesPage() {
                   required
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="font-body">Type</Label>
                   <Select value={newType} onValueChange={(val: any) => setNewType(val)}>
@@ -292,8 +289,11 @@ export default function TemplatesPage() {
                 </div>
                 <div className="flex gap-3 mt-6 pt-6 border-t">
                   <Button variant="outline" className="flex-1 h-11 font-body" onClick={() => setIsPreviewOpen(false)}>Close</Button>
-                  <Button className="flex-1 h-11 bg-teal-600 hover:bg-teal-700 font-body" onClick={() => handleSendTest(selectedTemplate)}>
-                    <Send size={16} className="mr-2" /> Send Test
+                  <Button
+                    className="flex-1 h-11 bg-teal-600 hover:bg-teal-700 font-body"
+                    onClick={() => handleCopy(selectedTemplate)}
+                  >
+                    <Copy size={16} className="mr-2" /> Copy body
                   </Button>
                 </div>
                 <Dialog.Close asChild>
@@ -306,6 +306,19 @@ export default function TemplatesPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+      <ConfirmDialog
+        open={deleteId !== null}
+        onClose={() => setDeleteId(null)}
+        onConfirm={() => {
+          if (deleteId) deleteTemplateMutation.mutate(deleteId);
+          setDeleteId(null);
+        }}
+        title="Delete template?"
+        description="This template will be removed. Messages already sent are unaffected."
+        confirmText="Delete"
+        confirmVariant="destructive"
+        isLoading={deleteTemplateMutation.isPending}
+      />
     </div>
   );
 }

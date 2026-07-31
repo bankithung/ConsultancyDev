@@ -4,32 +4,47 @@
   --font-heading: var(--font-poppins);
   --font-body: var(--font-mulish);
 
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  /* The `:root` palette below stores each colour as a bare HSL triplet
+     (`214.3 31.8% 91.4%`) rather than a finished colour -- the shadcn/Tailwind
+     v3 convention, where tailwind.config.js supplied the wrapper as
+     `hsl(var(--border))`. The v4 `@theme` migration dropped that config file,
+     and with it the wrapper, so `--color-border` resolved to the raw triplet:
+     not a colour, invalid at computed-value time, and therefore replaced by
+     the property's fallback. For `border-color` that fallback is
+     `currentColor` -- which is why every token-styled border rendered black --
+     and for `background-color` it is `transparent`, which silently erased the
+     primary/card/popover fills app-wide.
 
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
+     Re-adding `hsl()` here keeps the triplets in one place, so a future dark
+     theme can still override `--border` et al. by redeclaring the triplet.
+     Every entry is a triplet; none is already a finished colour, so wrapping
+     is uniform. Anything added to `:root` later must follow the same form. */
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
 
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
 
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
 
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
 
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
 
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
 
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
 
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
@@ -56,6 +71,90 @@
     to {
       height: 0
     }
+  }
+
+}
+
+/* ---------------------------------------------------------------- drawer ---
+   The right-edge panels — filters, and the refund form. Both render through
+   components/common/Drawer.tsx, which is what stamps the two `data-slot`
+   hooks these rules key on.
+
+   Driven by plain CSS on Radix's own `data-state` attribute rather than by
+   `animate-in`/`slide-in-from-right` utility classes: this project has no
+   animation plugin installed, so those classes (used elsewhere in
+   components/ui/dialog.tsx) resolve to nothing at all and the panel simply
+   appears. Radix waits for the close animation to finish before unmounting,
+   which is what makes the exit visible instead of a snap.
+
+   The easing is the standard iOS sheet curve — fast to leave the edge, gently
+   settling — so the panel reads as being dragged in rather than fading up. */
+@keyframes drawer-in {
+  from {
+    transform: translate3d(100%, 0, 0);
+  }
+
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes drawer-out {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scrim-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+[data-slot='drawer'][data-state='open'] {
+  animation: drawer-in 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform;
+}
+
+[data-slot='drawer'][data-state='closed'] {
+  animation: drawer-out 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform;
+}
+
+[data-slot='drawer-scrim'][data-state='open'] {
+  animation: scrim-in 0.32s ease-out;
+}
+
+[data-slot='drawer-scrim'][data-state='closed'] {
+  animation: scrim-out 0.24s ease-in;
+}
+
+/* A panel that flies in is decoration, not information. Honour the setting —
+   but keep a token duration so Radix still has an `animationend` to wait for
+   and the close does not race the unmount. */
+@media (prefers-reduced-motion: reduce) {
+
+  [data-slot='drawer'][data-state],
+  [data-slot='drawer-scrim'][data-state] {
+    animation-duration: 0.01ms;
   }
 }
 
@@ -146,15 +245,66 @@
   }
 }
 
-/* Scrollbar Styling */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+/* ------------------------------------------------------------ scrollbars ---
+   Windows draws a 17px scrollbar. Across a CRM that is a lot of chrome: every
+   wide table carries a thick bar beneath it, and every scrollable panel gives
+   up a sixth of an inch of content width to a control nobody looks at.
+
+   These rules are GLOBAL and set BOTH AXES. The previous `.custom-scrollbar`
+   class had neither property: a component only got thin bars if its author
+   remembered to opt in, and even then the rule set `width` alone -- so the
+   horizontal bars under the tables stayed at full thickness no matter what.
+
+   The two mechanisms below are deliberately kept apart. Naming
+   `scrollbar-width` anywhere makes Chrome discard the ::-webkit-scrollbar
+   rules for that element and substitute its own ~11px "thin", so the standard
+   property is fenced into `@supports not selector(...)` -- true only in
+   browsers that lack the pseudo-element, which is what Firefox needs. */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  @apply bg-transparent;
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  @apply bg-slate-300 rounded-full hover:bg-slate-400;
+::-webkit-scrollbar-thumb {
+  /* Transparent border + padding-box clip: 5px of visible thumb inside a 9px
+     hit area. Thin to look at, still catchable when dragging a wide table. */
+  background-color: #cbd5e1;
+  /* slate-300 */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+  /* slate-400 */
+}
+
+/* Where the two bars meet. Left unstyled it is an opaque grey notch. */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+}
+
+/* For strips that are scrollable but shouldn't advertise it with a bar --
+   the bookmark tab rail, where a scrollbar would cut across the seam that
+   joins the active tab to its panel. Only for short, finite lists whose
+   overflow is obvious from a clipped item at the edge. */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }

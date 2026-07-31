@@ -1,13 +1,31 @@
-Django>=5.2.8
-djangorestframework>=3.15.0
-djangorestframework-simplejwt>=5.3.0
-django-cors-headers>=4.3.0
-channels>=4.0.0
-channels-redis>=4.2.0
-daphne>=4.1.0
-gunicorn>=21.2.0
-psycopg2-binary>=2.9.9
-python-dotenv>=1.0.0
-redis>=5.0.0
-whitenoise>=6.6.0
-dj-database-url>=2.1.0
+# Pinned to exact versions.
+#
+# These were previously all `>=` with no upper bound, so a fresh install
+# resolved Django 6.0 against a codebase written for 5.2 — which silently
+# ignored STATICFILES_STORAGE (removed in 5.1) and left static files unhashed.
+# Regenerate with `pip freeze` after any deliberate upgrade.
+
+Django==6.0.7
+djangorestframework==3.17.1
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.9.0
+django-filter==26.1
+
+# RS256 JWT signing and Fernet encryption of PII at rest.
+cryptography==49.0.0
+PyJWT==2.13.0
+
+# Database
+psycopg2-binary==2.9.12
+dj-database-url==3.1.2
+
+# Serving
+gunicorn==26.0.0
+whitenoise==6.12.0
+
+# Config
+python-dotenv==1.2.2
+
+# Optional cache backend only. channels / channels-redis / daphne were removed
+# with the real-time messaging feature.
+redis==8.1.0

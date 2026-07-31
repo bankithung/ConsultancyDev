@@ -1,185 +1,277 @@
 'use client';
 
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '@/lib/apiClient';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useMemo, useState } from 'react';
+import { differenceInCalendarDays, format } from 'date-fns';
+import { AlertTriangle, Bell, Calendar, FileText, Search } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertTriangle, FileText, Calendar, Bell, Search, Filter } from 'lucide-react';
-import { format, differenceInDays } from 'date-fns';
+import { PaginationBar } from '@/components/common/PaginationBar';
+import { EmptyState, ErrorState, LoadingState } from '@/components/common/states';
+import { apiClient } from '@/lib/apiClient';
+import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
+import { useDebounce } from '@/hooks/useDebounce';
+import type { Document } from '@/lib/types';
 
-interface DocumentWithExpiry {
-    id: string;
-    fileName: string;
-    type: string;
-    studentName: string;
+type ExpiryStatus = 'Expired' | 'Expiring Soon' | 'Valid';
+
+/** Documents inside this window are flagged as expiring soon. */
+const SOON_WINDOW_DAYS = 90;
+
+interface ExpiryRow {
+    document: Document;
     expiryDate: string;
-    status: 'Valid' | 'Expiring Soon' | 'Expired';
     daysUntilExpiry: number;
+    status: ExpiryStatus;
 }
 
+function classify(days: number): ExpiryStatus {
+    if (days < 0) return 'Expired';
+    if (days <= SOON_WINDOW_DAYS) return 'Expiring Soon';
+    return 'Valid';
+}
+
+const STATUS_STYLE: Record<ExpiryStatus, string> = {
+    Expired: 'bg-red-100 text-red-700',
+    'Expiring Soon': 'bg-yellow-100 text-yellow-700',
+    Valid: 'bg-green-100 text-green-700',
+};
+
 export function DocumentExpiry() {
-    const [searchTerm, setSearchTerm] = useState('');
-    const [filterStatus, setFilterStatus] = useState('all');
+    const [searchInput, setSearchInput] = useState('');
+    const search = useDebounce(searchInput, 300);
+    const [statusFilter, setStatusFilter] = useState<'all' | ExpiryStatus>('all');
 
-    const { data: documents = [], isLoading } = useQuery({
-        queryKey: ['documents-expiring'],
-        queryFn: async () => {
-            const data = await apiClient.documents.getExpiringSoon();
-            return data as DocumentWithExpiry[];
-        },
+    // `documents/expiring-soon/` returns the same Document shape as the list
+    // endpoint; the status is derived here so the thresholds stay visible.
+    const documents = usePaginatedQuery<Document>(['documents-expiring'], apiClient.documents.getExpiringSoon, {
+        search,
+        ordering: 'expiry_date',
     });
 
-    if (isLoading) return <div className="flex items-center justify-center p-8"><div className="animate-pulse text-slate-500">Loading documents...</div></div>;
+    const rows = useMemo<ExpiryRow[]>(() => {
+        const today = new Date();
+        return documents.rows
+            .filter((document): document is Document & { expiryDate: string } => Boolean(document.expiryDate))
+            .map((document) => {
+                const days = differenceInCalendarDays(new Date(document.expiryDate), today);
+                return {
+                    document,
+                    expiryDate: document.expiryDate,
+                    daysUntilExpiry: days,
+                    status: classify(days),
+                };
+            });
+    }, [documents.rows]);
 
-    const filteredDocs = documents.filter(doc => {
-        const matchesSearch = doc.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            doc.fileName.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesFilter = filterStatus === 'all' || doc.status === filterStatus;
-        return matchesSearch && matchesFilter;
-    });
+    const visible = statusFilter === 'all' ? rows : rows.filter((row) => row.status === statusFilter);
 
-    const expiredCount = documents.filter(d => d.status === 'Expired').length;
-    const expiringSoonCount = documents.filter(d => d.status === 'Expiring Soon').length;
-    const validCount = documents.filter(d => d.status === 'Valid').length;
+    const counts = useMemo(
+        () => ({
+            expired: rows.filter((row) => row.status === 'Expired').length,
+            soon: rows.filter((row) => row.status === 'Expiring Soon').length,
+            valid: rows.filter((row) => row.status === 'Valid').length,
+        }),
+        [rows],
+    );
 
     return (
         <div className="space-y-6">
             <div>
-                <h2 className="text-xl font-semibold text-slate-900">Document Expiry Tracking</h2>
-                <p className="text-sm text-slate-600 mt-1">Monitor document validity and prevent last-minute issues</p>
+                <h2 className="text-lg font-semibold text-slate-900 sm:text-xl">Document expiry tracking</h2>
+                <p className="mt-1 text-sm text-slate-600">Monitor document validity and prevent last-minute issues</p>
             </div>
 
-            {/* Stats */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <Card className="border-red-200 bg-gradient-to-br from-red-50 to-white">
-                    <CardContent className="p-6">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-slate-600 font-body">Expired</p>
-                                <h3 className="text-3xl font-bold text-red-600 font-heading">{expiredCount}</h3>
+                    <CardContent className="p-5">
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-slate-600 font-body">Expired</p>
+                                <h3 className="text-2xl font-bold text-red-600 font-heading">
+                                    {counts.expired}
+                                </h3>
                             </div>
-                            <AlertTriangle className="h-10 w-10 text-red-600" />
+                            <AlertTriangle className="h-8 w-8 shrink-0 text-red-600 sm:h-10 sm:w-10" />
                         </div>
-                        <p className="text-xs text-red-600 mt-2 font-body font-semibold">Immediate action required</p>
+                        <p className="mt-2 text-xs font-semibold text-red-600 font-body">Immediate action required</p>
                     </CardContent>
                 </Card>
 
                 <Card className="border-yellow-200 bg-gradient-to-br from-yellow-50 to-white">
-                    <CardContent className="p-6">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-slate-600 font-body">Expiring Soon</p>
-                                <h3 className="text-3xl font-bold text-yellow-600 font-heading">{expiringSoonCount}</h3>
+                    <CardContent className="p-5">
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-slate-600 font-body">Expiring soon</p>
+                                <h3 className="text-2xl font-bold text-yellow-600 font-heading">
+                                    {counts.soon}
+                                </h3>
                             </div>
-                            <Bell className="h-10 w-10 text-yellow-600" />
+                            <Bell className="h-8 w-8 shrink-0 text-yellow-600 sm:h-10 sm:w-10" />
                         </div>
-                        <p className="text-xs text-yellow-600 mt-2 font-body font-semibold">Within 90 days</p>
+                        <p className="mt-2 text-xs font-semibold text-yellow-600 font-body">
+                            Within {SOON_WINDOW_DAYS} days
+                        </p>
                     </CardContent>
                 </Card>
 
                 <Card className="border-green-200 bg-gradient-to-br from-green-50 to-white">
-                    <CardContent className="p-6">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-slate-600 font-body">Valid</p>
-                                <h3 className="text-3xl font-bold text-green-600 font-heading">{validCount}</h3>
+                    <CardContent className="p-5">
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-slate-600 font-body">Valid</p>
+                                <h3 className="text-2xl font-bold text-green-600 font-heading">
+                                    {counts.valid}
+                                </h3>
                             </div>
-                            <FileText className="h-10 w-10 text-green-600" />
+                            <FileText className="h-8 w-8 shrink-0 text-green-600 sm:h-10 sm:w-10" />
                         </div>
-                        <p className="text-xs text-green-600 mt-2 font-body font-semibold">No action needed</p>
+                        <p className="mt-2 text-xs font-semibold text-green-600 font-body">No action needed</p>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* Filters */}
             <Card className="border-slate-200 bg-slate-50">
                 <CardContent className="pt-6">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                         <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                            <Input placeholder="Search by student or file..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 h-10 bg-white" />
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                            <Input
+                                placeholder="Search by student or file…"
+                                aria-label="Search expiring documents"
+                                value={searchInput}
+                                onChange={(e) => setSearchInput(e.target.value)}
+                                className="h-10 bg-white pl-10"
+                            />
                         </div>
-                        <Select value={filterStatus} onValueChange={setFilterStatus}>
-                            <SelectTrigger className="h-10 bg-white"><SelectValue /></SelectTrigger>
+                        <Select
+                            value={statusFilter}
+                            onValueChange={(value) => setStatusFilter(value as 'all' | ExpiryStatus)}
+                        >
+                            <SelectTrigger className="h-10 bg-white" aria-label="Filter by expiry status">
+                                <SelectValue />
+                            </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="all">All Status</SelectItem>
+                                <SelectItem value="all">All statuses</SelectItem>
                                 <SelectItem value="Expired">Expired</SelectItem>
-                                <SelectItem value="Expiring Soon">Expiring Soon</SelectItem>
+                                <SelectItem value="Expiring Soon">Expiring soon</SelectItem>
                                 <SelectItem value="Valid">Valid</SelectItem>
                             </SelectContent>
                         </Select>
-                        <Button variant="outline" className="h-10" onClick={() => { setFilterStatus('all'); setSearchTerm(''); }}>
-                            Clear Filters
+                        <Button
+                            variant="outline"
+                            className="h-10"
+                            onClick={() => {
+                                setStatusFilter('all');
+                                setSearchInput('');
+                            }}
+                            disabled={statusFilter === 'all' && searchInput === ''}
+                        >
+                            Clear filters
                         </Button>
                     </div>
                 </CardContent>
             </Card>
 
-            {/* Documents Table */}
-            <Card className="border-slate-200">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                        <thead className="bg-slate-50 border-b border-slate-200">
-                            <tr>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Document</th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase hidden md:table-cell">Student</th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Expiry Date</th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase hidden lg:table-cell">Days Left</th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Status</th>
-                                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white">
-                            {filteredDocs.map(doc => (
-                                <tr key={doc.id} className="hover:bg-slate-50">
-                                    <td className="px-4 py-4">
-                                        <div className="flex items-center gap-2">
-                                            <FileText size={16} className="text-teal-500" />
-                                            <div>
-                                                <p className="text-sm font-semibold text-slate-900 font-body">{doc.type}</p>
-                                                <p className="text-xs text-slate-500 font-body truncate max-w-[200px]">{doc.fileName}</p>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td className="px-4 py-4 text-sm text-slate-700 font-body hidden md:table-cell">{doc.studentName}</td>
-                                    <td className="px-4 py-4">
-                                        <div className="flex items-center gap-2">
-                                            <Calendar size={14} className="text-slate-400" />
-                                            <span className="text-sm font-medium text-slate-900 font-body">{format(new Date(doc.expiryDate), 'dd MMM yyyy')}</span>
-                                        </div>
-                                    </td>
-                                    <td className="px-4 py-4 hidden lg:table-cell">
-                                        <span className={`text-sm font-semibold font-body ${doc.daysUntilExpiry < 0 ? 'text-red-600' :
-                                            doc.daysUntilExpiry < 90 ? 'text-yellow-600' :
-                                                'text-green-600'
-                                            }`}>
-                                            {doc.daysUntilExpiry < 0 ? `${Math.abs(doc.daysUntilExpiry)} days ago` : `${doc.daysUntilExpiry} days`}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-4">
-                                        <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${doc.status === 'Expired' ? 'bg-red-100 text-red-700' :
-                                            doc.status === 'Expiring Soon' ? 'bg-yellow-100 text-yellow-700' :
-                                                'bg-green-100 text-green-700'
-                                            }`}>
-                                            {doc.status}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-4 text-right">
-                                        {doc.status !== 'Valid' && (
-                                            <Button size="sm" variant="outline" className="h-8 text-xs font-body">
-                                                <Bell size={12} className="mr-1" /> Notify
-                                            </Button>
-                                        )}
-                                    </td>
+            {documents.isError ? (
+                <ErrorState error={documents.error} onRetry={documents.refetch} />
+            ) : documents.isLoading ? (
+                <LoadingState rows={4} label="Loading expiring documents" />
+            ) : visible.length === 0 ? (
+                <EmptyState
+                    icon={Calendar}
+                    title="Nothing expiring"
+                    description="Documents with an expiry date appear here as the date approaches."
+                />
+            ) : (
+                <Card className="overflow-hidden border-slate-200">
+                    <div className="overflow-x-auto">
+                        <table className="w-full min-w-[560px] text-sm">
+                            <thead className="border-b border-slate-200 bg-slate-50">
+                                <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700">
+                                        Document
+                                    </th>
+                                    <th className="hidden px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700 md:table-cell">
+                                        Student
+                                    </th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700">
+                                        Expiry date
+                                    </th>
+                                    <th className="hidden px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700 lg:table-cell">
+                                        Days left
+                                    </th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700">
+                                        Status
+                                    </th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </Card>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 bg-white">
+                                {visible.map((row) => (
+                                    <tr key={row.document.id} className="hover:bg-slate-50">
+                                        <td className="px-4 py-4">
+                                            <div className="flex items-center gap-2">
+                                                <FileText size={16} className="shrink-0 text-teal-500" />
+                                                <div className="min-w-0">
+                                                    <p className="truncate text-sm font-semibold text-slate-900 font-body">
+                                                        {row.document.type}
+                                                    </p>
+                                                    <p className="max-w-[200px] truncate text-xs text-slate-500 font-body">
+                                                        {row.document.fileName}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="hidden px-4 py-4 text-sm text-slate-700 font-body md:table-cell">
+                                            {row.document.studentName || '—'}
+                                        </td>
+                                        <td className="px-4 py-4">
+                                            <div className="flex items-center gap-2">
+                                                <Calendar size={14} className="shrink-0 text-slate-400" />
+                                                <span className="whitespace-nowrap text-sm font-medium text-slate-900 font-body">
+                                                    {format(new Date(row.expiryDate), 'dd MMM yyyy')}
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td className="hidden px-4 py-4 lg:table-cell">
+                                            <span
+                                                className={`whitespace-nowrap text-sm font-semibold font-body ${
+                                                    row.daysUntilExpiry < 0
+                                                        ? 'text-red-600'
+                                                        : row.daysUntilExpiry <= SOON_WINDOW_DAYS
+                                                          ? 'text-yellow-600'
+                                                          : 'text-green-600'
+                                                }`}
+                                            >
+                                                {row.daysUntilExpiry < 0
+                                                    ? `${Math.abs(row.daysUntilExpiry)} days ago`
+                                                    : `${row.daysUntilExpiry} days`}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-4">
+                                            <span
+                                                className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_STYLE[row.status]}`}
+                                            >
+                                                {row.status}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <PaginationBar
+                        page={documents.page}
+                        pages={documents.pages}
+                        count={documents.count}
+                        pageSize={documents.pageSize}
+                        onPageChange={documents.setPage}
+                        isLoading={documents.isFetching}
+                    />
+                </Card>
+            )}
         </div>
     );
 }

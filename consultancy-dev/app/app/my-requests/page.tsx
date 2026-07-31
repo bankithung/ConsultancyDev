@@ -3,10 +3,23 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
+import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ApprovalRequest } from '@/lib/types';
+
+/**
+ * `ApprovalRequest.Status` on the backend is PENDING/APPROVED/REJECTED/FAILED
+ * (core/models.py:813-817), but lib/types declares it title-case. Comparing
+ * against the wire value through this alias keeps the runtime correct until
+ * lib/types is corrected — fe-infra has been told.
+ */
+type WireApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'FAILED';
+
+const wireStatus = (request: { status: string }): WireApprovalStatus =>
+  request.status as WireApprovalStatus;
+
 import { format } from 'date-fns';
 import { Search, Filter, Clock, CheckCircle, XCircle, MessageSquare, Trash2, FileEdit, CheckSquare } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
@@ -17,14 +30,17 @@ export default function MyRequestsPage() {
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [filterAction, setFilterAction] = useState<string>('all');
 
-    const { data: requests, isLoading } = useQuery({
-        queryKey: ['approval-requests'],
-        queryFn: apiClient.approvalRequests.list,
-    });
+    const requestsQuery = usePaginatedQuery<ApprovalRequest>(
+        ['approval-requests', 'mine'],
+        apiClient.approvalRequests.list,
+        { pageSize: 100, ordering: '-created_at' },
+    );
+    const requests = requestsQuery.rows;
+    const isLoading = requestsQuery.isLoading;
 
-    // Filter requests for current user and apply search/filters
-    const filteredRequests = requests?.filter((req: ApprovalRequest) => {
-        // Filter by current user (if backend doesn't already)
+    // The API already scopes to what the caller may see; this narrows it to the
+    // requests they raised themselves.
+    const filteredRequests = requests.filter((req: ApprovalRequest) => {
         if (user && req.requested_by !== user.id) return false;
 
         const matchesSearch = req.entity_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -38,16 +54,16 @@ export default function MyRequestsPage() {
 
     const getStatusColor = (status: string) => {
         switch (status) {
-            case 'Approved': return 'bg-green-100 text-green-700 border-green-200';
-            case 'Rejected': return 'bg-red-100 text-red-700 border-red-200';
+            case 'APPROVED': return 'bg-green-100 text-green-700 border-green-200';
+            case 'REJECTED': return 'bg-red-100 text-red-700 border-red-200';
             default: return 'bg-yellow-100 text-yellow-700 border-yellow-200';
         }
     };
 
     const getStatusIcon = (status: string) => {
         switch (status) {
-            case 'Approved': return <CheckCircle size={16} className="mr-1" />;
-            case 'Rejected': return <XCircle size={16} className="mr-1" />;
+            case 'APPROVED': return <CheckCircle size={16} className="mr-1" />;
+            case 'REJECTED': return <XCircle size={16} className="mr-1" />;
             default: return <Clock size={16} className="mr-1" />;
         }
     };
@@ -88,9 +104,9 @@ export default function MyRequestsPage() {
                         </SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">All Status</SelectItem>
-                            <SelectItem value="Pending">Pending</SelectItem>
-                            <SelectItem value="Approved">Approved</SelectItem>
-                            <SelectItem value="Rejected">Rejected</SelectItem>
+                            <SelectItem value="PENDING">Pending</SelectItem>
+                            <SelectItem value="APPROVED">Approved</SelectItem>
+                            <SelectItem value="REJECTED">Rejected</SelectItem>
                         </SelectContent>
                     </Select>
                     <Select value={filterAction} onValueChange={setFilterAction}>
@@ -142,8 +158,8 @@ export default function MyRequestsPage() {
                                         {req.message}
                                     </div>
 
-                                    {(req.status === 'Approved' || req.status === 'Rejected') && req.review_note && (
-                                        <div className={`rounded-lg p-3 text-sm ${req.status === 'Approved' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
+                                    {(wireStatus(req) === 'APPROVED' || wireStatus(req) === 'REJECTED') && req.review_note && (
+                                        <div className={`rounded-lg p-3 text-sm ${wireStatus(req) === 'APPROVED' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
                                             }`}>
                                             <div className="flex items-start gap-2">
                                                 <MessageSquare size={16} className="mt-0.5 shrink-0" />

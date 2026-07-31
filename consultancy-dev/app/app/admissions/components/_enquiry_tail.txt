@@ -1,0 +1,287 @@
+const MODAL_TABS = [
+  { id: 'personal', label: 'Personal', icon: Users },
+  { id: 'family', label: 'Family & Address', icon: Users },
+  { id: 'hslc', label: 'HSLC (Class 10)', icon: GraduationCap },
+  { id: 'hsslc', label: 'HSSLC (Class 12)', icon: GraduationCap },
+  { id: 'scores', label: 'Science & NEET', icon: GraduationCap },
+  { id: 'preferences', label: 'Preferences', icon: Filter },
+] as const;
+
+type ModalTabId = (typeof MODAL_TABS)[number]['id'];
+
+type FieldValue = string | number | null | undefined;
+
+function EnquiryViewModal({
+  enquiry,
+  onClose,
+  router,
+}: {
+  enquiry: Enquiry;
+  onClose: () => void;
+  router: AppRouter;
+}) {
+  const [activeTab, setActiveTab] = useState<ModalTabId>('personal');
+
+  const gapYear = enquiry.gapYear
+    ? [enquiry.gapYearFrom, enquiry.gapYearTo].filter(Boolean).join(' – ') || 'Yes'
+    : 'No';
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'personal':
+        return (
+          <div className="space-y-6">
+            <div className="rounded-lg border border-teal-200 bg-teal-50 p-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                <div className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-2xl font-bold ${getAvatarColor(enquiry.candidateName).bg} ${getAvatarColor(enquiry.candidateName).text}`}>
+                  {getInitials(enquiry.candidateName)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate text-lg font-bold text-slate-900">{enquiry.candidateName}</h3>
+                  <p className="text-sm text-slate-600">ID: {enquiry.id}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <span className="rounded border border-teal-200 bg-white px-2 py-1 text-xs">
+                      {enquiry.branch_name || 'No branch'}
+                    </span>
+                    <span className="rounded border border-teal-200 bg-white px-2 py-1 text-xs">
+                      Owner: {enquiry.owner_name || 'Unassigned'}
+                    </span>
+                  </div>
+                </div>
+                <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${statusBadge(enquiry.status)}`}>
+                  {enquiry.status}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="mb-3 text-sm font-bold text-slate-700">Contact Information</h4>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <ModalField label="Mobile" value={enquiry.mobile} icon={Phone} />
+                <ModalField label="Email" value={enquiry.email} icon={Mail} />
+                <ModalField label="Enquiry Date" value={formatDate(enquiry.date)} />
+                <ModalField label="Course Interested" value={enquiry.courseInterested} icon={GraduationCap} />
+                <ModalField label="Gender" value={enquiry.gender} />
+                <ModalField label="Date of Birth" value={formatDate(enquiry.dateOfBirth ?? undefined)} />
+                <ModalField label="Category" value={enquiry.caste} />
+                <ModalField label="Religion" value={enquiry.religion} />
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'family':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h4 className="mb-3 text-sm font-bold text-slate-700">Father&apos;s Information</h4>
+              <div className="rounded-lg bg-slate-50 p-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <ModalField label="Name" value={enquiry.fatherName} />
+                  <ModalField label="Occupation" value={enquiry.fatherOccupation} />
+                  <ModalField label="Mobile" value={enquiry.fatherMobile} icon={Phone} />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="mb-3 text-sm font-bold text-slate-700">Mother&apos;s Information</h4>
+              <div className="rounded-lg bg-slate-50 p-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <ModalField label="Name" value={enquiry.motherName} />
+                  <ModalField label="Occupation" value={enquiry.motherOccupation} />
+                  <ModalField label="Mobile" value={enquiry.motherMobile} icon={Phone} />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="mb-3 text-sm font-bold text-slate-700">Address Details</h4>
+              <div className="rounded-lg bg-slate-50 p-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <ModalField label="City/Place" value={enquiry.familyPlace} />
+                  <ModalField label="State" value={enquiry.familyState} />
+                  <div className="sm:col-span-2">
+                    <ModalField label="Permanent Address" value={enquiry.permanentAddress} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'hslc':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h4 className="mb-3 text-sm font-bold text-slate-700">HSLC / Class 10 Details</h4>
+              <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <ModalField label="School Name" value={enquiry.class10SchoolName} />
+                  <ModalField label="Board" value={enquiry.class10Board} />
+                  <ModalField label="Passing Year" value={enquiry.class10PassingYear} />
+                  <ModalField label="Percentage" value={enquiry.class10Percentage} />
+                  <ModalField label="City/Place" value={enquiry.class10Place} />
+                  <ModalField label="State" value={enquiry.class10State} />
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'hsslc':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h4 className="mb-3 text-sm font-bold text-slate-700">HSSLC / Class 12 Details</h4>
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <ModalField label="School Name" value={enquiry.schoolName} />
+                  <ModalField label="Stream" value={enquiry.stream} />
+                  <ModalField label="Board" value={enquiry.schoolBoard} />
+                  <ModalField label="Passing Year" value={enquiry.class12PassingYear} />
+                  <ModalField label="Percentage" value={enquiry.class12Percentage} />
+                  <ModalField label="City/Place" value={enquiry.schoolPlace} />
+                  <ModalField label="State" value={enquiry.schoolState} />
+                  <ModalField label="Gap Year" value={gapYear} />
+                  <ModalField label="College Dropout" value={enquiry.collegeDropout ? 'Yes' : 'No'} />
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'scores':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h4 className="mb-3 text-sm font-bold text-slate-700">Science Scorecard</h4>
+              <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                  <ModalField label="Physics" value={enquiry.physicsMarks} />
+                  <ModalField label="Chemistry" value={enquiry.chemistryMarks} />
+                  <ModalField label="Biology" value={enquiry.biologyMarks} />
+                  <ModalField label="Maths" value={enquiry.mathsMarks} />
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-4 border-t border-purple-200 pt-4 sm:grid-cols-2">
+                  <ModalField label="PCB %" value={enquiry.pcbPercentage} />
+                  <ModalField label="PCM %" value={enquiry.pcmPercentage} />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="mb-3 text-sm font-bold text-slate-700">NEET Scores</h4>
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <ModalField label="Previous NEET Score" value={enquiry.previousNeetMarks} />
+                  <ModalField label="Present NEET Score" value={enquiry.presentNeetMarks} />
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'preferences':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h4 className="mb-3 text-sm font-bold text-slate-700">Preferred Education Hubs</h4>
+              <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
+                {enquiry.preferredLocations && enquiry.preferredLocations.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {enquiry.preferredLocations.map((loc) => (
+                      <span key={loc} className="rounded-lg border border-orange-200 bg-white px-3 py-1.5 text-sm text-slate-700">
+                        {loc}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500">No preferred locations selected</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <ModalField label="Other Preferred Location" value={enquiry.otherLocation} />
+              <ModalField label="Budget / Payment" value={enquiry.paymentAmount} />
+            </div>
+          </div>
+        );
+    }
+  };
+
+  return (
+    <>
+      <div className="flex items-center justify-between border-b border-slate-200 p-4">
+        <Dialog.Title className="text-lg font-bold text-slate-900">Enquiry Details</Dialog.Title>
+        <Dialog.Close asChild>
+          <button className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Close">
+            <X size={20} />
+          </button>
+        </Dialog.Close>
+      </div>
+
+      <div className="flex flex-1 flex-col overflow-hidden sm:flex-row">
+        {/* Tabs: a horizontal scroller on phones, a sidebar from `sm` up. */}
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 p-2 sm:w-48 sm:flex-col sm:overflow-x-visible sm:border-b-0 sm:border-r">
+          {MODAL_TABS.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2.5 text-left text-sm transition-all ${isActive ? 'bg-teal-600 font-medium text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                <Icon size={16} className="shrink-0" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">{renderTabContent()}</div>
+      </div>
+
+      <div className="flex flex-col justify-end gap-3 border-t border-slate-200 bg-slate-50 p-4 sm:flex-row">
+        <Button variant="outline" className="h-10 border-slate-300 px-6 hover:bg-slate-100" onClick={onClose}>
+          Close
+        </Button>
+        <Button
+          className="h-10 bg-teal-600 px-6 hover:bg-teal-700"
+          onClick={() => {
+            router.push(`/app/student-profile/enquiry/${enquiry.id}`);
+            onClose();
+          }}
+        >
+          <Edit size={16} className="mr-2" /> View Full Profile
+        </Button>
+      </div>
+    </>
+  );
+}
+
+function ModalField({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: FieldValue;
+  icon?: React.ComponentType<{ size?: number; className?: string }>;
+}) {
+  const display = value === null || value === undefined || value === '' ? '—' : value;
+
+  return (
+    <div className="space-y-1">
+      <p className="flex items-center gap-1 text-xs font-medium text-slate-500">
+        {Icon && <Icon size={12} className="text-slate-400" />}
+        {label}
+      </p>
+      <p className="break-words rounded border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900">
+        {display}
+      </p>
+    </div>
+  );
+}

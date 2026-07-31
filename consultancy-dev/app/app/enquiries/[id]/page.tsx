@@ -3,6 +3,7 @@
 import { useRouter, useParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
+import { createApprovalRequest } from '@/components/common/approvals';
 import { EnquiryForm } from '../components/EnquiryForm';
 import { Button } from '@/components/ui/button';
 import { BackButton } from '@/components/ui/back-button';
@@ -26,7 +27,7 @@ export default function EnquiryDetailsPage() {
   const approvalMutation = useMutation({
     mutationFn: async (data: any) => {
       if (!enquiry) return;
-      await apiClient.approvalRequests.create({
+      await createApprovalRequest({
         action: 'UPDATE',
         entity_type: 'enquiry',
         entity_id: Number(id),
@@ -78,7 +79,7 @@ export default function EnquiryDetailsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="space-y-2">
           <BackButton />
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Enquiry Details</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Enquiry Details</h1>
           <p className="text-sm text-slate-600">
             {user?.role === 'EMPLOYEE'
               ? 'Submit changes for admin approval'

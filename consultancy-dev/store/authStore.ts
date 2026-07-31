@@ -1,7 +1,34 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { User } from '@/lib/types';
-import { api } from '@/lib/api';
+import type { Role, User } from '@/lib/types';
+import { api, getApiErrorMessage } from '@/lib/api';
+import {
+  clearTokens,
+  getAccessToken,
+  getRefreshToken,
+  setTokens,
+} from '@/lib/tokens';
+
+/** POST /api/auth/login/ response. */
+interface LoginResponse {
+  access: string;
+  refresh: string;
+  user: User;
+}
+
+export interface SignupPayload {
+  username: string;
+  email: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  role: Role;
+  phone?: string;
+  /** COMPANY_ADMIN signups only -- these create a signup request for review. */
+  company_name?: string;
+  admin_name?: string;
+  plan?: string;
+}
 
 interface AuthState {
   user: User | null;
@@ -9,11 +36,11 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
   login: (username: string, password: string) => Promise<void>;
-  signup: (userData: any) => Promise<void>;
-  logout: () => void;
+  signup: (userData: SignupPayload) => Promise<void>;
+  logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
   clearError: () => void;
-  hasRole: (role: string | string[]) => boolean;
+  hasRole: (role: Role | Role[]) => boolean;
   isDevAdmin: () => boolean;
   isCompanyAdmin: () => boolean;
 }
@@ -29,27 +56,32 @@ export const useAuthStore = create<AuthState>()(
       login: async (username, password) => {
         set({ isLoading: true, error: null });
         try {
-          const response = await api.post('token/', { username, password });
-          const { access, refresh } = response.data;
-          localStorage.setItem('auth-token', access);
-          localStorage.setItem('refresh-token', refresh);
+          const response = await api.post<LoginResponse>('auth/login/', {
+            username,
+            password,
+          });
+          const { access, refresh, user } = response.data;
 
-          // Set cookie for middleware
-          document.cookie = `auth-token=${access}; path=/; max-age=86400; SameSite=Lax`;
+          // Writes both tokens to localStorage and mirrors the access token
+          // into the `auth-token` cookie that middleware.ts verifies. The
+          // cookie's max-age is derived from the token's own `exp`, so the
+          // route guard and the token expire together (~15 min) instead of the
+          // cookie outliving the token by a day.
+          setTokens({ access, refresh });
 
-          // Fetch user details
-          const userResponse = await api.get('users/me/');
+          // The login response already carries the user, so no follow-up
+          // request to /api/users/me/ is needed here.
           set({
-            user: userResponse.data,
+            user,
             isAuthenticated: true,
             isLoading: false,
-            error: null
+            error: null,
           });
-        } catch (error: any) {
-          const errorMessage = error.response?.data?.detail ||
-            error.response?.data?.message ||
-            'Login failed. Please check your credentials.';
-          console.error('Login failed:', error);
+        } catch (error) {
+          const errorMessage = getApiErrorMessage(
+            error,
+            'Login failed. Please check your credentials.'
+          );
           set({ error: errorMessage, isLoading: false });
           throw error;
         }
@@ -69,58 +101,71 @@ export const useAuthStore = create<AuthState>()(
               company_name: userData.company_name,
               admin_name: userData.admin_name,
               phone: userData.phone,
-              plan: userData.plan || 'Starter'
+              plan: userData.plan || 'Starter',
             });
-            set({ isLoading: false, error: null });
           } else {
             // Regular employee signup (requires company admin)
             await api.post('users/', userData);
-            set({ isLoading: false, error: null });
           }
-        } catch (error: any) {
-          const errorMessage = error.response?.data?.detail ||
-            error.response?.data?.message ||
-            'Signup failed. Please try again.';
-          console.error('Signup failed:', error);
+          set({ isLoading: false, error: null });
+        } catch (error) {
+          const errorMessage = getApiErrorMessage(
+            error,
+            'Signup failed. Please try again.'
+          );
           set({ error: errorMessage, isLoading: false });
           throw error;
         }
       },
 
-      logout: () => {
-        localStorage.removeItem('auth-token');
-        localStorage.removeItem('refresh-token');
-        document.cookie = 'auth-token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+      logout: async () => {
+        const refresh = getRefreshToken();
+
+        // Revoke server-side first: /api/auth/logout/ blacklists the refresh
+        // token (205). Without this call the token stays valid until it
+        // expires, so "logging out" never actually ended the session.
+        if (refresh) {
+          try {
+            await api.post('auth/logout/', { refresh });
+          } catch {
+            // A failed revocation must not strand the user in a logged-in UI.
+            // Worst case the refresh token lives out its natural lifetime; the
+            // local session is cleared either way.
+          }
+        }
+
+        clearTokens();
         set({ user: null, isAuthenticated: false, error: null });
       },
 
       checkAuth: async () => {
-        const token = localStorage.getItem('auth-token');
-        if (token) {
-          // Ensure cookie is set if token exists (e.g. after refresh)
-          if (!document.cookie.includes('auth-token=')) {
-            document.cookie = `auth-token=${token}; path=/; max-age=86400; SameSite=Lax`;
+        const token = getAccessToken();
+        if (!token) {
+          // Clear any stale persisted user from a previous session.
+          if (get().isAuthenticated) {
+            set({ user: null, isAuthenticated: false });
           }
+          return;
+        }
 
-          set({ isLoading: true });
-          try {
-            const userResponse = await api.get('users/me/');
-            set({
-              user: userResponse.data,
-              isAuthenticated: true,
-              isLoading: false,
-              error: null
-            });
-          } catch (error) {
-            localStorage.removeItem('auth-token');
-            localStorage.removeItem('refresh-token');
-            document.cookie = 'auth-token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-            set({
-              user: null,
-              isAuthenticated: false,
-              isLoading: false
-            });
-          }
+        set({ isLoading: true });
+        try {
+          const userResponse = await api.get<User>('users/me/');
+          set({
+            user: userResponse.data,
+            isAuthenticated: true,
+            isLoading: false,
+            error: null,
+          });
+        } catch {
+          // The axios interceptor already attempted a refresh; reaching here
+          // means the session is genuinely gone.
+          clearTokens();
+          set({
+            user: null,
+            isAuthenticated: false,
+            isLoading: false,
+          });
         }
       },
 
@@ -128,7 +173,7 @@ export const useAuthStore = create<AuthState>()(
         set({ error: null });
       },
 
-      hasRole: (role: string | string[]) => {
+      hasRole: (role: Role | Role[]) => {
         const user = get().user;
         if (!user) return false;
         if (Array.isArray(role)) {
@@ -137,21 +182,15 @@ export const useAuthStore = create<AuthState>()(
         return user.role === role;
       },
 
-      isDevAdmin: () => {
-        const user = get().user;
-        return user?.role === 'DEV_ADMIN';
-      },
+      isDevAdmin: () => get().user?.role === 'DEV_ADMIN',
 
-      isCompanyAdmin: () => {
-        const user = get().user;
-        return user?.role === 'COMPANY_ADMIN';
-      }
+      isCompanyAdmin: () => get().user?.role === 'COMPANY_ADMIN',
     }),
     {
       name: 'auth-storage',
       partialize: (state) => ({
         user: state.user,
-        isAuthenticated: state.isAuthenticated
+        isAuthenticated: state.isAuthenticated,
       }),
     }
   )

@@ -1,179 +1,119 @@
 """
-Django signals for broadcasting real-time updates
-"""
-from django.db.models.signals import post_save, post_delete
-from django.dispatch import receiver
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
+Model signals.
 
+The previous version of this file existed to push WebSocket broadcasts. That
+feature has been removed, and it was broken anyway: every handler passed
+`company_id=None`, which routed all events to a single global room that normal
+users never joined, while any user with a blank company landed in that room and
+received other tenants' activity.
+
+What remains is derived-state maintenance and notification fan-out, both cheap
+and in-process.
+"""
+
+import logging
+
+from django.db.models import Count, Q, Sum
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
+
+from . import capabilities
 from .models import (
-    Enquiry, Registration, Enrollment, Payment,
-    Document, Task, Appointment, Notification,
-    FollowUp, User
+    Agent, Commission, Enrollment, Notification, Registration, Role,
+    RolePermission, User,
 )
 
+logger = logging.getLogger('core')
 
-def broadcast_event(entity_type, action, instance, company_id=None):
+
+@receiver(post_save, sender=RolePermission)
+@receiver(post_delete, sender=RolePermission)
+def role_permission_changed(sender, instance, **kwargs):
     """
-    Broadcast an event to all WebSocket connections in the same company room.
-    
-    Args:
-        entity_type: Type of entity (e.g., 'enquiry', 'registration')
-        action: Action performed ('created', 'updated', 'deleted')
-        instance: The model instance
-        company_id: Company ID to broadcast to (None for all)
+    Drop the company's cached capability matrix whenever a row moves.
+
+    The API already invalidates once per batch, which is cheaper. This exists
+    for every OTHER writer — the Django admin, a management command, a data
+    migration, a shell session — because a permission change that the running
+    process keeps serving from cache is a security decision that did not take
+    effect.
     """
-    channel_layer = get_channel_layer()
-    
-    if not channel_layer:
+    capabilities.invalidate(instance.company_id)
+
+
+def notify(users, title, message='', type='info', action_url=''):
+    """Create notifications in one query instead of one INSERT per recipient."""
+    recipients = [u for u in users if u is not None]
+    if not recipients:
         return
-    
-    # Determine which room to broadcast to
-    if company_id:
-        room_group_name = f'updates_company_{company_id}'
-    else:
-        room_group_name = 'updates_dev_admin'
-    
-    # Prepare event data
-    event_data = {
-        'type': 'broadcast_update',
-        'entity': entity_type,
-        'action': action,
-        'data': {
-            'id': instance.id if hasattr(instance, 'id') else None,
-        }
-    }
-    
-    # Broadcast to room
-    try:
-        async_to_sync(channel_layer.group_send)(
-            room_group_name,
-            event_data
+    Notification.objects.bulk_create([
+        Notification(
+            user=user,
+            company_id=user.company_id,
+            title=title,
+            message=message,
+            type=type,
+            action_url=action_url,
         )
-    except Exception as e:
-        print(f"Error broadcasting event: {e}")
+        for user in recipients
+    ])
 
 
-# Enquiry signals
-@receiver(post_save, sender=Enquiry)
-def enquiry_saved(sender, instance, created, **kwargs):
-    """Broadcast when enquiry is created or updated"""
-    action = 'created' if created else 'updated'
-    # Enquiries don't have company_id, broadcast to all
-    broadcast_event('enquiry', action, instance, company_id=None)
+def _recalculate_agent_totals(agent_id):
+    """
+    Recompute an agent's stored aggregates from their commission rows.
+
+    These columns were previously written by nothing at all, so the figures
+    shown in the UI were whatever the row happened to be seeded with.
+    """
+    if not agent_id:
+        return
+    totals = Commission.objects.filter(agent_id=agent_id).aggregate(
+        paid=Sum('commission_amount', filter=Q(status='Paid')),
+        pending=Sum('commission_amount', filter=Q(status='Pending')),
+        referred=Count('student', distinct=True),
+    )
+    Agent.objects.filter(pk=agent_id).update(
+        total_earned=totals['paid'] or 0,
+        pending_amount=totals['pending'] or 0,
+        students_referred=totals['referred'] or 0,
+    )
 
 
-@receiver(post_delete, sender=Enquiry)
-def enquiry_deleted(sender, instance, **kwargs):
-    """Broadcast when enquiry is deleted"""
-    broadcast_event('enquiry', 'deleted', instance, company_id=None)
+@receiver(post_save, sender=Commission)
+def commission_saved(sender, instance, **kwargs):
+    _recalculate_agent_totals(instance.agent_id)
 
 
-# Registration signals
-@receiver(post_save, sender=Registration)
-def registration_saved(sender, instance, created, **kwargs):
-    """Broadcast when registration is created or updated"""
-    action = 'created' if created else 'updated'
-    broadcast_event('registration', action, instance, company_id=None)
+@receiver(post_delete, sender=Commission)
+def commission_deleted(sender, instance, **kwargs):
+    _recalculate_agent_totals(instance.agent_id)
 
 
-@receiver(post_delete, sender=Registration)
-def registration_deleted(sender, instance, **kwargs):
-    """Broadcast when registration is deleted"""
-    broadcast_event('registration', 'deleted', instance, company_id=None)
-
-
-# Enrollment signals
 @receiver(post_save, sender=Enrollment)
-def enrollment_saved(sender, instance, created, **kwargs):
-    """Broadcast when enrollment is created or updated"""
-    action = 'created' if created else 'updated'
-    broadcast_event('enrollment', action, instance, company_id=None)
+def enrollment_created(sender, instance, created, **kwargs):
+    """Notify the company admins and the owning branch's manager."""
+    if not created or not instance.company_id:
+        return
+
+    recipients = User.objects.filter(
+        company_id=instance.company_id, is_active=True,
+    ).filter(
+        Q(role=Role.COMPANY_ADMIN)
+        | Q(role=Role.BRANCH_MANAGER, branch_id=instance.branch_id)
+    )
+    notify(
+        list(recipients),
+        title='New enrollment',
+        message=f'{instance.enrollment_no} — {instance.program_name}',
+        type='success',
+        action_url=f'/app/enrollments/{instance.pk}',
+    )
 
 
-@receiver(post_delete, sender=Enrollment)
-def enrollment_deleted(sender, instance, **kwargs):
-    """Broadcast when enrollment is deleted"""
-    broadcast_event('enrollment', 'deleted', instance, company_id=None)
-
-
-# Payment signals
-@receiver(post_save, sender=Payment)
-def payment_saved(sender, instance, created, **kwargs):
-    """Broadcast when payment is created or updated"""
-    action = 'created' if created else 'updated'
-    broadcast_event('payment', action, instance, company_id=None)
-
-
-@receiver(post_delete, sender=Payment)
-def payment_deleted(sender, instance, **kwargs):
-    """Broadcast when payment is deleted"""
-    broadcast_event('payment', 'deleted', instance, company_id=None)
-
-
-# Document signals
-@receiver(post_save, sender=Document)
-def document_saved(sender, instance, created, **kwargs):
-    """Broadcast when document is created or updated"""
-    action = 'created' if created else 'updated'
-    broadcast_event('document', action, instance, company_id=None)
-
-
-@receiver(post_delete, sender=Document)
-def document_deleted(sender, instance, **kwargs):
-    """Broadcast when document is deleted"""
-    broadcast_event('document', 'deleted', instance, company_id=None)
-
-
-# Task signals
-@receiver(post_save, sender=Task)
-def task_saved(sender, instance, created, **kwargs):
-    """Broadcast when task is created or updated"""
-    action = 'created' if created else 'updated'
-    broadcast_event('task', action, instance, company_id=None)
-
-
-@receiver(post_delete, sender=Task)
-def task_deleted(sender, instance, **kwargs):
-    """Broadcast when task is deleted"""
-    broadcast_event('task', 'deleted', instance, company_id=None)
-
-
-# FollowUp signals
-@receiver(post_save, sender=FollowUp)
-def followup_saved(sender, instance, created, **kwargs):
-    """Broadcast when follow-up is created or updated"""
-    action = 'created' if created else 'updated'
-    broadcast_event('followup', action, instance, company_id=None)
-
-
-@receiver(post_delete, sender=FollowUp)
-def followup_deleted(sender, instance, **kwargs):
-    """Broadcast when follow-up is deleted"""
-    broadcast_event('followup', 'deleted', instance, company_id=None)
-
-
-# Notification signals (only broadcast created, as they're usually not updated/deleted)
-@receiver(post_save, sender=Notification)
-def notification_created(sender, instance, created, **kwargs):
-    """Broadcast when notification is created"""
+@receiver(post_save, sender=Registration)
+def registration_created(sender, instance, created, **kwargs):
     if created:
-        # Get user's company_id
-        company_id = instance.user.company_id if hasattr(instance.user, 'company_id') else None
-        broadcast_event('notification', 'created', instance, company_id=company_id)
-
-
-# User signals (for user management updates)
-@receiver(post_save, sender=User)
-def user_saved(sender, instance, created, **kwargs):
-    """Broadcast when user is created or updated"""
-    action = 'created' if created else 'updated'
-    company_id = instance.company_id
-    broadcast_event('user', action, instance, company_id=company_id)
-
-
-@receiver(post_delete, sender=User)
-def user_deleted(sender, instance, **kwargs):
-    """Broadcast when user is deleted"""
-    company_id = instance.company_id
-    broadcast_event('user', 'deleted', instance, company_id=company_id)
+        logger.info(
+            'Registration %s created for company %s', instance.pk, instance.company_id,
+        )

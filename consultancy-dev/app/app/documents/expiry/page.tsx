@@ -1,14 +1,33 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { toArray } from '@/components/common/pagination';
+import { ErrorState, LoadingState } from '@/components/common/states';
+import { toast } from '@/store/toastStore';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertTriangle, FileText, Calendar, Bell, Search, Filter } from 'lucide-react';
+import { AlertTriangle, FileText, Calendar, Bell, Search, Download } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
+
+/**
+ * Document expiry tracking.
+ *
+ * IMPORTANT: the `status` shown here is a DERIVED validity state
+ * (Valid / Expiring Soon / Expired) computed from `expiryDate`. It is NOT
+ * `Document.status`, whose server vocabulary is `IN` | `OUT` and describes
+ * custody, not validity. Conflating the two is how the old build ended up
+ * filtering on values the API never sends.
+ */
+
+/** How many days ahead counts as "expiring soon". */
+const EXPIRY_WARNING_DAYS = 90;
+
+type ExpiryState = 'Valid' | 'Expiring Soon' | 'Expired';
 
 interface DocumentWithExpiry {
   id: string;
@@ -16,7 +35,7 @@ interface DocumentWithExpiry {
   type: string;
   studentName: string;
   expiryDate: string;
-  status: 'Valid' | 'Expiring Soon' | 'Expired';
+  expiryState: ExpiryState;
   daysUntilExpiry: number;
 }
 
@@ -24,30 +43,83 @@ export default function DocumentExpiryPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
 
-  const { data: documents = [], isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    // A thunk: `getExpiringSoon` takes PageParams and returns the paginated
+    // envelope, not a bare array.
     queryKey: ['documents-expiring'],
-    queryFn: () => apiClient.documents.getExpiring(90), // Get documents expiring within 90 days
+    queryFn: () => apiClient.documents.getExpiringSoon({ page_size: 200, ordering: 'expiry_date' }),
   });
 
-  if (isLoading) return <div className="flex items-center justify-center min-h-screen"><div className="animate-pulse text-slate-500">Loading documents...</div></div>;
+  const documents = useMemo<DocumentWithExpiry[]>(() => {
+    const today = new Date();
+    return toArray(data)
+      .filter((doc) => Boolean(doc.expiryDate))
+      .map((doc) => {
+        const expiryDate = doc.expiryDate as string;
+        const daysUntilExpiry = differenceInDays(new Date(expiryDate), today);
+        const expiryState: ExpiryState =
+          daysUntilExpiry < 0 ? 'Expired' : daysUntilExpiry <= EXPIRY_WARNING_DAYS ? 'Expiring Soon' : 'Valid';
+        return {
+          id: doc.id,
+          fileName: doc.fileName,
+          type: doc.type,
+          studentName: doc.studentName ?? '—',
+          expiryDate,
+          expiryState,
+          daysUntilExpiry,
+        };
+      });
+  }, [data]);
 
-  const filteredDocs = documents.filter(doc => {
-    const matchesSearch = doc.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      doc.fileName.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === 'all' || doc.status === filterStatus;
-    return matchesSearch && matchesFilter;
-  });
+  const filteredDocs = useMemo(() => {
+    const needle = searchTerm.toLowerCase();
+    return documents.filter((doc) => {
+      const matchesSearch =
+        needle === '' ||
+        doc.studentName.toLowerCase().includes(needle) ||
+        doc.fileName.toLowerCase().includes(needle);
+      const matchesFilter = filterStatus === 'all' || doc.expiryState === filterStatus;
+      return matchesSearch && matchesFilter;
+    });
+  }, [documents, searchTerm, filterStatus]);
 
-  const expiredCount = documents.filter(d => d.status === 'Expired').length;
-  const expiringSoonCount = documents.filter(d => d.status === 'Expiring Soon').length;
-  const validCount = documents.filter(d => d.status === 'Valid').length;
+  const expiredCount = documents.filter((d) => d.expiryState === 'Expired').length;
+  const expiringSoonCount = documents.filter((d) => d.expiryState === 'Expiring Soon').length;
+  const validCount = documents.filter((d) => d.expiryState === 'Valid').length;
+
+  const handleDownload = async (doc: DocumentWithExpiry) => {
+    try {
+      await apiClient.documents.downloadAndSave(doc.id, doc.fileName);
+    } catch {
+      toast.error('Download failed', 'The document could not be retrieved.');
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 font-heading">Document Expiry Tracking</h1>
+          <p className="text-sm text-slate-600 mt-1 font-body">Monitor document validity and prevent last-minute issues</p>
+        </div>
+        <LoadingState rows={5} label="Loading documents…" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-heading">Document Expiry Tracking</h1>
-        <p className="text-sm text-slate-600 mt-1 font-body">Monitor document validity and prevent last-minute issues</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 font-heading">Document Expiry Tracking</h1>
+          <p className="text-sm text-slate-600 mt-1 font-body">Monitor document validity and prevent last-minute issues</p>
+        </div>
+        <Button variant="outline" size="sm" className="shrink-0" asChild>
+          <Link href="/app/documents?tab=digital">Open in Documents</Link>
+        </Button>
       </div>
+
+      {isError && <ErrorState error={error} onRetry={() => void refetch()} title="Could not load documents" />}
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -56,7 +128,7 @@ export default function DocumentExpiryPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-600 font-body">Expired</p>
-                <h3 className="text-3xl font-bold text-red-600 font-heading">{expiredCount}</h3>
+                <h3 className="text-2xl font-bold text-red-600 font-heading">{expiredCount}</h3>
               </div>
               <AlertTriangle className="h-10 w-10 text-red-600" />
             </div>
@@ -69,7 +141,7 @@ export default function DocumentExpiryPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-600 font-body">Expiring Soon</p>
-                <h3 className="text-3xl font-bold text-yellow-600 font-heading">{expiringSoonCount}</h3>
+                <h3 className="text-2xl font-bold text-yellow-600 font-heading">{expiringSoonCount}</h3>
               </div>
               <Bell className="h-10 w-10 text-yellow-600" />
             </div>
@@ -82,7 +154,7 @@ export default function DocumentExpiryPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-600 font-body">Valid</p>
-                <h3 className="text-3xl font-bold text-green-600 font-heading">{validCount}</h3>
+                <h3 className="text-2xl font-bold text-green-600 font-heading">{validCount}</h3>
               </div>
               <FileText className="h-10 w-10 text-green-600" />
             </div>
@@ -130,6 +202,21 @@ export default function DocumentExpiryPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
+              {filteredDocs.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-12 text-center">
+                    <FileText className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+                    <p className="text-sm font-semibold text-slate-900">
+                      {documents.length === 0 ? 'No documents have an expiry date' : 'No documents match your filters'}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {documents.length === 0
+                        ? 'Set an expiry date when uploading a document to track it here.'
+                        : 'Try clearing the search or status filter.'}
+                    </p>
+                  </td>
+                </tr>
+              )}
               {filteredDocs.map(doc => (
                 <tr key={doc.id} className="hover:bg-slate-50">
                   <td className="px-4 py-4">
@@ -150,26 +237,46 @@ export default function DocumentExpiryPage() {
                   </td>
                   <td className="px-4 py-4 hidden lg:table-cell">
                     <span className={`text-sm font-semibold font-body ${doc.daysUntilExpiry < 0 ? 'text-red-600' :
-                        doc.daysUntilExpiry < 90 ? 'text-yellow-600' :
-                          'text-green-600'
+                      doc.daysUntilExpiry < 90 ? 'text-yellow-600' :
+                        'text-green-600'
                       }`}>
                       {doc.daysUntilExpiry < 0 ? `${Math.abs(doc.daysUntilExpiry)} days ago` : `${doc.daysUntilExpiry} days`}
                     </span>
                   </td>
                   <td className="px-4 py-4">
-                    <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${doc.status === 'Expired' ? 'bg-red-100 text-red-700' :
-                        doc.status === 'Expiring Soon' ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-green-100 text-green-700'
+                    <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${doc.expiryState === 'Expired' ? 'bg-red-100 text-red-700' :
+                      doc.expiryState === 'Expiring Soon' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-green-100 text-green-700'
                       }`}>
-                      {doc.status}
+                      {doc.expiryState}
                     </span>
                   </td>
-                  <td className="px-4 py-4 text-right">
-                    {doc.status !== 'Valid' && (
-                      <Button size="sm" variant="outline" className="h-8 text-xs font-body">
-                        <Bell size={12} className="mr-1" /> Notify
+                  <td className="px-4 py-4">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs font-body"
+                        onClick={() => void handleDownload(doc)}
+                      >
+                        <Download size={12} className="mr-1" /> Download
                       </Button>
-                    )}
+                      {/* GAP: notifications are created server-side only — the
+                          viewset is read-only apart from mark-read — so there is
+                          no endpoint that can raise a reminder from here. Left
+                          visible but disabled rather than silently doing nothing. */}
+                      {doc.expiryState !== 'Valid' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs font-body"
+                          disabled
+                          title="Reminders are generated by the server; there is no endpoint to raise one from here."
+                        >
+                          <Bell size={12} className="mr-1" /> Notify
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

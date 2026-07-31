@@ -8,9 +8,14 @@ import { DataTable } from '@/components/ui/data-table';
 import { Check, X, Clock, Building, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { api } from '@/lib/api';
-import { WithRoleGuard } from '@/components/WithRoleGuard';
+import { api, getApiErrorMessage } from '@/lib/api';
+import { RoleRoute } from '@/components/rbac/RoleGate';
+import { ROLES } from '@/components/rbac/roles';
 import { useToast } from '@/hooks/use-toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Modal } from '@/components/common/Modal';
+import { Label } from '@/components/ui/label';
+import { InlineSpinner } from '@/components/common/states';
 
 interface SignupRequest {
   id: number;
@@ -32,6 +37,9 @@ interface SignupRequest {
 
 function SignupRequestsPageContent() {
   const queryClient = useQueryClient();
+  const [approveTarget, setApproveTarget] = useState<number | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<number | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
   const { toast } = useToast();
 
   // Fetch signup requests
@@ -51,18 +59,10 @@ function SignupRequestsPageContent() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['signup-requests'] });
-      toast({
-        title: "Request Approved",
-        description: `Company admin account created successfully for ${data.username}`,
-        variant: "default",
-      });
+      toast.success('Request approved', 'Company admin account created for ' + data.username);
     },
     onError: (error: any) => {
-      toast({
-        title: "Approval Failed",
-        description: error.response?.data?.error || "Failed to approve request",
-        variant: "destructive",
-      });
+      toast.error('Approval failed', getApiErrorMessage(error));
     }
   });
 
@@ -74,32 +74,20 @@ function SignupRequestsPageContent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['signup-requests'] });
-      toast({
-        title: "Request Rejected",
-        description: "Signup request has been rejected",
-        variant: "default",
-      });
+      toast.success('Request rejected', 'The signup request has been rejected.');
     },
     onError: (error: any) => {
-      toast({
-        title: "Rejection Failed",
-        description: error.response?.data?.error || "Failed to reject request",
-        variant: "destructive",
-      });
+      toast.error('Rejection failed', getApiErrorMessage(error));
     }
   });
 
   const handleApprove = (id: number) => {
-    if (confirm('Approve this signup request? A company admin account will be created.')) {
-      approveMutation.mutate(id);
-    }
+    setApproveTarget(id);
   };
 
   const handleReject = (id: number) => {
-    const reason = prompt('Enter rejection reason:');
-    if (reason) {
-      rejectMutation.mutate({ id, reason });
-    }
+    setRejectTarget(id);
+    setRejectReason('');
   };
 
   const pendingCount = requests.filter(r => r.status === 'Pending').length;
@@ -127,7 +115,7 @@ function SignupRequestsPageContent() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Company Signup Requests</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Company Signup Requests</h1>
           <p className="text-sm text-slate-600 mt-1">Review and approve new company registrations</p>
         </div>
         <div className="flex items-center gap-2 px-4 py-2 bg-yellow-50 border border-yellow-200 rounded-lg">
@@ -234,14 +222,80 @@ function SignupRequestsPageContent() {
           ]}
         />
       )}
+
+      <ConfirmDialog
+        open={approveTarget !== null}
+        onClose={() => setApproveTarget(null)}
+        onConfirm={() => {
+          if (approveTarget !== null) approveMutation.mutate(approveTarget);
+          setApproveTarget(null);
+        }}
+        title="Approve this signup request?"
+        description="A company, its default branch, a trial subscription and a company-admin account will be created. This cannot be undone."
+        confirmText="Approve and provision"
+        isLoading={approveMutation.isPending}
+      />
+
+      <Modal
+        open={rejectTarget !== null}
+        onClose={() => setRejectTarget(null)}
+        title="Reject signup request"
+        description="The reason is stored with the request so the decision is auditable."
+        footer={
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button variant="outline" type="button" className="h-11 sm:w-32" onClick={() => setRejectTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="reject-form"
+              variant="destructive"
+              className="h-11 sm:w-40"
+              disabled={rejectMutation.isPending || rejectReason.trim() === ''}
+            >
+              {rejectMutation.isPending ? (
+                <>
+                  <InlineSpinner className="mr-2" /> Rejecting…
+                </>
+              ) : (
+                'Reject request'
+              )}
+            </Button>
+          </div>
+        }
+      >
+        <form
+          id="reject-form"
+          className="space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (rejectTarget !== null) {
+              rejectMutation.mutate({ id: rejectTarget, reason: rejectReason.trim() });
+            }
+            setRejectTarget(null);
+          }}
+        >
+          <Label htmlFor="reject-reason">Reason *</Label>
+          <textarea
+            id="reject-reason"
+            required
+            rows={3}
+            autoFocus
+            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            placeholder="Why is this request being rejected?"
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+          />
+        </form>
+      </Modal>
     </div>
   );
 }
 
 export default function SignupRequestsPage() {
   return (
-    <WithRoleGuard allowedRoles={['DEV_ADMIN']}>
+    <RoleRoute allow={[ROLES.DEV_ADMIN]}>
       <SignupRequestsPageContent />
-    </WithRoleGuard>
+    </RoleRoute>
   );
 }
