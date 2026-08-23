@@ -53,3 +53,5 @@ Thumbs.db
 # Misc
 *.bak
 *.tmp
+deploy/webhook_secret
+.deploy_test
