@@ -1,0 +1,18 @@
+[Unit]
+Description=Consultancy Next.js frontend
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/consultancy/consultancy-dev
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

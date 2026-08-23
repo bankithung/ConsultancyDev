@@ -1,0 +1,23 @@
+[Unit]
+Description=Consultancy Django API (gunicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/consultancy/backend
+# EnvironmentFile does NOT do variable expansion, so DATABASE_URL etc. are read as-is.
+EnvironmentFile=/opt/consultancy/backend/.env
+ExecStartPre=/opt/consultancy/backend/venv/bin/python manage.py migrate --noinput
+ExecStart=/opt/consultancy/backend/venv/bin/gunicorn config.wsgi:application \
+    --bind 127.0.0.1:8000 --workers 4 --timeout 30 --access-logfile - --error-logfile -
+Restart=always
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
