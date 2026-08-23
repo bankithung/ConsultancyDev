@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ArrowRightLeft, Download, FileText, Search, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { PaginationBar } from '@/components/common/PaginationBar';
 import {
@@ -52,7 +53,10 @@ export function DocumentList() {
 
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [docType, setDocType] = useState<string>('General');
-    const [studentName, setStudentName] = useState('');
+    // Encodes WHICH record was picked, not just its label: 'reg:<id>' or
+    // 'enq:<id>'. The upload sends the matching foreign key, and the server
+    // derives student_name from it.
+    const [studentRef, setStudentRef] = useState('');
     const [expiryDate, setExpiryDate] = useState('');
     const [fileError, setFileError] = useState<string | null>(null);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -66,6 +70,28 @@ export function DocumentList() {
         filters: statusFilter === 'all' ? undefined : { status: statusFilter },
     });
 
+    // Both stages are pickable: an enquirer has no Registration row yet, so
+    // restricting this to registrations would leave their documents unlinkable.
+    const { data: studentOptions = [], isLoading: studentsLoading } = useQuery({
+        queryKey: ['document-student-options'],
+        queryFn: async () => {
+            const [registrations, enquiries] = await Promise.all([
+                apiClient.registrations.list({ page_size: 200, ordering: 'student_name' }),
+                apiClient.enquiries.list({ page_size: 200, ordering: 'candidate_name' }),
+            ]);
+            return [
+                ...registrations.results.map((r) => ({
+                    value: `reg:${r.id}`,
+                    label: `${r.studentName} · ${r.registrationNo ?? 'Registered'}`,
+                })),
+                ...enquiries.results.map((e) => ({
+                    value: `enq:${e.id}`,
+                    label: `${e.candidateName || e.schoolName} · Enquiry`,
+                })),
+            ];
+        },
+    });
+
     const invalidate = () => {
         queryClient.invalidateQueries({ queryKey: ['documents'] });
         queryClient.invalidateQueries({ queryKey: ['documents-expiring'] });
@@ -74,17 +100,19 @@ export function DocumentList() {
     const uploadMutation = useMutation({
         mutationFn: () => {
             if (!selectedFile) throw new Error('Choose a file to upload.');
+            const [kind, id] = studentRef.split(':');
             return apiClient.documents.upload({
                 file: selectedFile,
                 type: docType,
-                studentName: studentName || undefined,
+                registration: kind === 'reg' ? id : undefined,
+                enquiry: kind === 'enq' ? id : undefined,
                 expiryDate: expiryDate || undefined,
             });
         },
         onSuccess: () => {
             invalidate();
             setSelectedFile(null);
-            setStudentName('');
+            setStudentRef('');
             setExpiryDate('');
             setFieldErrors({});
             setUploaded(true);
@@ -323,17 +351,21 @@ export function DocumentList() {
 
                         <div className="space-y-2">
                             <Label htmlFor="doc-student" className="font-medium text-slate-700">
-                                Student name
+                                Student
                             </Label>
-                            <Input
-                                id="doc-student"
-                                placeholder="Who does this belong to?"
-                                value={studentName}
-                                onChange={(e) => setStudentName(e.target.value)}
-                                className="h-10 bg-white"
+                            <SearchableSelect
+                                options={studentOptions}
+                                value={studentRef}
+                                onChange={setStudentRef}
+                                disabled={studentsLoading}
+                                placeholder={
+                                    studentsLoading ? 'Loading students...' : 'Search students...'
+                                }
                             />
-                            {fieldErrors.student_name && (
-                                <p className="text-xs text-red-600">{fieldErrors.student_name}</p>
+                            {(fieldErrors.registration || fieldErrors.enquiry) && (
+                                <p className="text-xs text-red-600">
+                                    {fieldErrors.registration ?? fieldErrors.enquiry}
+                                </p>
                             )}
                         </div>
 

@@ -141,7 +141,7 @@ class AnonymousAccessTests(BaseAPITestCase):
     ENDPOINTS = [
         'enquiries', 'registrations', 'enrollments', 'installments', 'payments',
         'documents', 'tasks', 'appointments', 'universities', 'templates',
-        'commissions', 'refunds', 'lead-sources', 'visa-tracking', 'follow-ups',
+        'commissions', 'refunds', 'visa-tracking', 'follow-ups',
         'agents', 'transfers', 'approval-requests', 'users', 'branches',
         'companies', 'subscriptions', 'notifications',
     ]
@@ -1372,28 +1372,34 @@ class FinancialScopeTests(BaseAPITestCase):
         self.assertEqual(stages['Enquiries'], 3)
 
 
-class SubscriptionLimitTests(BaseAPITestCase):
-    def test_branch_creation_respects_the_plan_limit(self):
-        starter = Plan.objects.get(slug='starter')  # max_branches = 1
-        subscription = self.company.subscription
-        subscription.plan = starter
-        subscription.save()
+class SubscriptionsRemovedTests(BaseAPITestCase):
+    """
+    Subscriptions no longer gate anything: every tenant gets free, unlimited
+    access for unlimited time. These tests pin that guarantee down so a
+    billing check cannot creep back in unnoticed.
+    """
 
+    ENQUIRY = {
+        'school_name': 'S', 'stream': 'Sci', 'course_interested': 'X',
+        'mobile': '9', 'email': 'x@example.com', 'father_name': 'F',
+        'mother_name': 'M', 'permanent_address': 'A',
+    }
+
+    def _on_starter(self):
+        """Put the company on the old most-restrictive plan."""
+        subscription = self.company.subscription
+        subscription.plan = Plan.objects.get(slug='starter')
+        subscription.save()
+        return subscription
+
+    def test_branch_creation_is_not_capped_by_the_plan(self):
+        self._on_starter()
         client = self.auth(self.admin)
         response = client.post('/api/branches/', {'name': 'Mokokchung'}, format='json')
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 201)
 
-    def test_deactivating_a_user_frees_a_plan_seat(self):
-        """
-        The quota counted Django's `is_active`, but deactivation toggles
-        `is_active_employee`. A company that onboarded and offboarded staff
-        therefore hit a permanent ceiling with no route back through the UI.
-        """
-        starter = Plan.objects.get(slug='starter')  # max_users = 5
-        subscription = self.company.subscription
-        subscription.plan = starter
-        subscription.save()
-
+    def test_hiring_is_not_capped_by_the_plan(self):
+        self._on_starter()
         client = self.auth(self.admin)
 
         def hire(name):
@@ -1402,24 +1408,13 @@ class SubscriptionLimitTests(BaseAPITestCase):
                 'role': Role.EMPLOYEE, 'branch': self.kohima.pk,
             }, format='json')
 
-        # The fixture seats 7 against a 5-seat plan, so the next hire is refused.
-        self.assertEqual(hire('over1').status_code, 400)
+        # The fixture already seats more staff than the old 5-seat Starter plan
+        # allowed, so under the old rules the very first hire here was refused.
+        for n in range(3):
+            self.assertEqual(hire('extra%d' % n).status_code, 201)
 
-        # Free enough seats to get under the cap (7 -> 4, so the hire makes 5).
-        for leaver in (self.emp_k2, self.emp_d1, self.mgr_d):
-            self.assertEqual(
-                client.post(f'/api/users/{leaver.pk}/set-active/',
-                            {'is_active': False}, format='json').status_code,
-                200,
-            )
-
-        self.assertEqual(
-            hire('over1').status_code, 201,
-            'seats were not released when employees were deactivated',
-        )
-
-    def test_company_without_a_subscription_cannot_write(self):
-        """Fail closed: a company created outside provision_company has no plan."""
+    def test_company_without_a_subscription_can_still_write(self):
+        """A company created outside provision_company has no plan at all."""
         orphan = Company.objects.create(name='Orphan Consultancy')
         branch = Branch.objects.create(company=orphan, name='Only', is_default=True)
         user = User.objects.create(
@@ -1430,27 +1425,86 @@ class SubscriptionLimitTests(BaseAPITestCase):
         user.save()
 
         client = self.auth(user)
-        response = client.post('/api/enquiries/', {
-            'school_name': 'S', 'stream': 'Sci', 'course_interested': 'X',
-            'mobile': '9', 'email': 'x@example.com', 'father_name': 'F',
-            'mother_name': 'M', 'permanent_address': 'A',
-        }, format='json')
-        self.assertEqual(response.status_code, 403)
+        response = client.post('/api/enquiries/', self.ENQUIRY, format='json')
+        self.assertEqual(response.status_code, 201)
 
-    def test_writes_blocked_when_subscription_expired(self):
+    def test_expired_subscription_still_permits_writes(self):
         subscription = self.company.subscription
         subscription.status = Subscription.Status.EXPIRED
         subscription.save()
 
         client = self.auth(self.admin)
-        response = client.post('/api/enquiries/', {
-            'school_name': 'S', 'stream': 'Sci', 'course_interested': 'X',
-            'mobile': '9', 'email': 'x@example.com', 'father_name': 'F',
-            'mother_name': 'M', 'permanent_address': 'A',
-        }, format='json')
-        self.assertEqual(response.status_code, 403)
-        # Reads still work so a lapsed customer can export their data.
+        self.assertEqual(
+            client.post('/api/enquiries/', self.ENQUIRY, format='json').status_code,
+            201,
+        )
         self.assertEqual(client.get('/api/enquiries/').status_code, 200)
+
+
+class ServerAssignedReferenceTests(BaseAPITestCase):
+    """
+    A record must be creatable without its reference number -- the number is
+    generated server-side in perform_create.
+
+    DRF builds a UniqueTogetherValidator from the ('company', <ref>) model
+    constraint, and that validator forces an implied 'required' on every field
+    it covers. It runs during validation, before perform_create, so every
+    create that relied on generation died with "<ref>: This field is required."
+    """
+
+    REGISTRATION = {
+        'student_name': 'Sara Sharma',
+        'mobile': '9130801582',
+        'email': 'sara.sharma@example.com',
+        'registration_fee': '5000',
+        'payment_status': 'Paid',
+        'payment_method': 'Cash',
+    }
+
+    def test_registration_create_generates_the_reference(self):
+        client = self.auth(self.admin)
+        response = client.post('/api/registrations/', self.REGISTRATION, format='json')
+        self.assertEqual(response.status_code, 201, getattr(response, 'data', None))
+        self.assertTrue(
+            response.data['registration_no'].startswith('REG-'),
+            response.data['registration_no'],
+        )
+
+    def test_consecutive_registrations_get_distinct_references(self):
+        client = self.auth(self.admin)
+        first = client.post('/api/registrations/', self.REGISTRATION, format='json')
+        second = client.post(
+            '/api/registrations/', dict(self.REGISTRATION, mobile='9000000001'),
+            format='json',
+        )
+        self.assertEqual(first.status_code, 201, getattr(first, 'data', None))
+        self.assertEqual(second.status_code, 201, getattr(second, 'data', None))
+        self.assertNotEqual(
+            first.data['registration_no'], second.data['registration_no'],
+        )
+
+    def test_an_explicitly_supplied_reference_is_kept(self):
+        client = self.auth(self.admin)
+        response = client.post(
+            '/api/registrations/',
+            dict(self.REGISTRATION, registration_no='REG-CUSTOM-1'),
+            format='json',
+        )
+        self.assertEqual(response.status_code, 201, getattr(response, 'data', None))
+        self.assertEqual(response.data['registration_no'], 'REG-CUSTOM-1')
+
+    def test_enrollment_carries_the_same_relaxed_validator(self):
+        """Enrollment has the identical constraint and the identical bug."""
+        from core.serializers import (
+            EnrollmentSerializer, _OptionalRefUniqueTogetherValidator,
+        )
+        covering = [
+            v for v in EnrollmentSerializer().validators
+            if 'enrollment_no' in getattr(v, 'fields', ())
+        ]
+        self.assertTrue(covering, 'no unique-together validator covers enrollment_no')
+        for validator in covering:
+            self.assertIsInstance(validator, _OptionalRefUniqueTogetherValidator)
 
 
 class AuthLifecycleTests(BaseAPITestCase):
@@ -1624,6 +1678,109 @@ class DocumentTests(BaseAPITestCase):
         download = client.get(f'/api/documents/{document.pk}/download/')
         self.assertEqual(download.status_code, 200)
         self.assertEqual(b''.join(download.streaming_content), self.PDF)
+
+    # ---------------------------------------------------------------- linking
+    #
+    # A document that names a student in free text is not linked to that
+    # student. The upload form posted `student_name` plus a `registration_no`
+    # that was never a serializer field, so DRF dropped it silently and every
+    # document uploaded through the UI landed with both FKs null.
+
+    def _upload_linked(self, client, **extra):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        body = {
+            'file_name': 'passport.pdf',
+            'file': SimpleUploadedFile(
+                'passport.pdf', self.PDF, content_type='application/pdf',
+            ),
+            'type': 'Passport',
+        }
+        body.update(extra)
+        return client.post('/api/documents/', body, format='multipart')
+
+    def test_uploading_against_a_registration_stores_the_fk(self):
+        client = self.auth(self.emp_k1)
+        registration = Registration.objects.create(
+            company=self.emp_k1.company, branch=self.kohima,
+            created_by=self.emp_k1, owner=self.emp_k1,
+            registration_no='REG-LINK-1', student_name='Linked Student',
+            email='linked@example.com', registration_fee=Decimal('1000.00'),
+        )
+
+        response = self._upload_linked(client, registration=registration.pk)
+        self.assertEqual(response.status_code, 201, response.data)
+
+        document = Document.objects.get(pk=response.data['id'])
+        self.assertEqual(document.registration_id, registration.pk)
+        self.assertIsNone(document.enquiry_id)
+
+    def test_uploading_against_an_enquiry_stores_the_fk(self):
+        """The reason the enquiry FK exists: an enquirer has no Registration."""
+        client = self.auth(self.emp_k1)
+
+        response = self._upload_linked(client, enquiry=self.enq_k1.pk)
+        self.assertEqual(response.status_code, 201, response.data)
+
+        document = Document.objects.get(pk=response.data['id'])
+        self.assertEqual(document.enquiry_id, self.enq_k1.pk)
+        self.assertIsNone(document.registration_id)
+
+    def test_the_student_name_is_derived_from_the_link_not_the_client(self):
+        """
+        `student_name` is a denormalised cache for list and search, not the
+        truth. Trusting the posted value is what let it drift from the record
+        it names.
+        """
+        client = self.auth(self.emp_k1)
+
+        response = self._upload_linked(
+            client, enquiry=self.enq_k1.pk, student_name='Someone Else Entirely',
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+
+        document = Document.objects.get(pk=response.data['id'])
+        self.assertEqual(
+            document.student_name, self.enq_k1.candidate_name,
+            'the posted student_name must not override the linked record',
+        )
+
+    def test_a_document_cannot_name_two_different_students(self):
+        client = self.auth(self.emp_k1)
+        registration = Registration.objects.create(
+            company=self.emp_k1.company, branch=self.kohima,
+            created_by=self.emp_k1, owner=self.emp_k1,
+            registration_no='REG-LINK-2', student_name='Linked Student',
+            email='linked2@example.com', registration_fee=Decimal('1000.00'),
+        )
+
+        response = self._upload_linked(
+            client, registration=registration.pk, enquiry=self.enq_k1.pk,
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+
+    def test_a_document_cannot_link_across_the_tenant_boundary(self):
+        """
+        The FK is a new way to name a row by id, so it needs the same scope
+        check every other reference field gets.
+        """
+        client = self.auth(self.emp_k1)
+
+        response = self._upload_linked(client, enquiry=self.enq_rival.pk)
+        self.assertEqual(
+            response.status_code, 400,
+            "an employee must not attach a document to another tenant's enquiry",
+        )
+
+    def test_an_unlinked_upload_is_still_allowed(self):
+        """Not every document belongs to a student; the link is optional."""
+        client = self.auth(self.emp_k1)
+        response = self._upload_linked(client, student_name='Walk-in Copy')
+        self.assertEqual(response.status_code, 201, response.data)
+
+        document = Document.objects.get(pk=response.data['id'])
+        self.assertIsNone(document.registration_id)
+        self.assertIsNone(document.enquiry_id)
+        self.assertEqual(document.student_name, 'Walk-in Copy')
 
     def test_rival_cannot_download_our_document(self):
         owner = self.auth(self.emp_k1)

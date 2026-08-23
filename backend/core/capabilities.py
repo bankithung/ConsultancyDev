@@ -104,8 +104,6 @@ DEFAULTS = {
     # are scoped by get_queryset, so an employee sees only their own row. An
     # admin who wants it restricted can now do that from the permissions screen.
     Capability.MANAGE_COUNSELORS: ALL_ROLES,
-    # lead-sources/ read and write — admin-only, including reads.
-    Capability.MANAGE_LEAD_SOURCES: _ADMINS,
     # refunds/ writes — ReadOnlyOrManager. Reads stay open to the tenant.
     Capability.MANAGE_REFUNDS: _MANAGERS_UP,
     # ScopedModelViewSet.perform_destroy — everyone except EMPLOYEE, who raises

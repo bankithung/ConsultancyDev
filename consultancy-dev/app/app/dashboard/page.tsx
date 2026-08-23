@@ -293,7 +293,7 @@ function AdminDashboard() {
                 <div className="space-y-2">
                   <QuickAction href="/app/enquiries/new" icon={Plus} label="New Enquiry" tone="teal" />
                   <QuickAction href="/app/registrations/new" icon={UserPlus} label="Register Student" tone="emerald" />
-                  <QuickAction href="/app/counselors" icon={Users} label="Team Members" tone="blue" />
+                  <QuickAction href="/app/team" icon={Users} label="Team Members" tone="blue" />
                   <QuickAction
                     href="/app/approval-requests"
                     icon={CheckCircle2}

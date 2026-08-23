@@ -17,8 +17,11 @@ import { DocumentUploadModal } from './DocumentUploadModal';
 
 interface DocumentListProps {
   studentName: string;
-  /** Registration number (e.g. `REG-…`), the only hard link a scan carries. */
+  /** Human reference (e.g. `REG-…`), shown to the user. Not a key. */
   registrationNo?: string;
+  /** The actual records an upload is attached to. */
+  registrationId?: string;
+  enquiryId?: string;
 }
 
 function formatSize(bytes: number | undefined): string | null {
@@ -34,33 +37,49 @@ function formatSize(bytes: number | undefined): string | null {
  * Distinct from `PhysicalDocumentList`, which tracks the original paper the
  * office physically holds.
  */
-export function DocumentList({ studentName, registrationNo }: DocumentListProps) {
+export function DocumentList({
+  studentName,
+  registrationNo,
+  registrationId,
+  enquiryId,
+}: DocumentListProps) {
   const queryClient = useQueryClient();
   const { can } = useCurrentRole();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Document | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  // `student_name` and `registration_no` are not in the documents endpoint's
-  // filterset, so `search` is the only server-side narrowing available; the
-  // exact match below is what actually decides membership.
+  // Membership is a foreign key, so the server can answer it. The name match
+  // below is only a fallback for documents uploaded before the link existed --
+  // those carry a name and nothing else.
+  const linkFilter: Record<string, string> | null = registrationId
+    ? { registration: registrationId }
+    : enquiryId
+      ? { enquiry: enquiryId }
+      : null;
   const searchTerm = registrationNo || studentName;
 
   const documentsQuery = useQuery({
-    queryKey: ['documents', 'for-student', searchTerm],
-    queryFn: () => loadAllPages<Document>((params) => apiClient.documents.list(params), { search: searchTerm }),
-    enabled: Boolean(searchTerm),
+    queryKey: ['documents', 'for-student', linkFilter ?? searchTerm],
+    queryFn: () =>
+      loadAllPages<Document>(
+        (params) => apiClient.documents.list(params),
+        linkFilter ? { filters: linkFilter } : { search: searchTerm },
+      ),
+    enabled: Boolean(linkFilter) || Boolean(searchTerm),
   });
 
   const studentDocuments = useMemo(() => {
     const rows = documentsQuery.data ?? [];
     return rows
       .filter((doc) => {
+        // Already narrowed server-side; nothing further to decide.
+        if (linkFilter) return true;
         if (registrationNo && doc.registrationNo) return doc.registrationNo === registrationNo;
         return sameName(doc.studentName, studentName);
       })
       .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
-  }, [documentsQuery.data, registrationNo, studentName]);
+  }, [documentsQuery.data, linkFilter, registrationNo, studentName]);
 
   const downloadMutation = useMutation({
     mutationFn: async (doc: Document) => {
@@ -178,6 +197,8 @@ export function DocumentList({ studentName, registrationNo }: DocumentListProps)
         onClose={() => setIsUploadOpen(false)}
         studentName={studentName}
         registrationNo={registrationNo}
+        registrationId={registrationId}
+        enquiryId={enquiryId}
       />
 
       <ConfirmDialog

@@ -25,7 +25,6 @@ import {
   LogOut,
   DollarSign,
   Building2,
-  TrendingUp,
   ArrowLeftRight,
   GitBranch,
   ShieldCheck,
@@ -163,16 +162,17 @@ const NAV_SECTIONS: NavSection[] = [
     heading: 'Management',
     items: [
       { label: 'Branches', href: '/app/branches', icon: GitBranch, roles: ADMINS },
-      { label: 'Users', href: '/app/users', icon: Users, roles: ADMINS },
+      // One roster. `Users` (accounts) and `Counselors` (the same payload as
+      // cards) were two doors onto it; the write controls inside are gated on
+      // `manageUsers`, so a head manager reads it and changes nothing.
+      { label: 'Team', href: '/app/team', icon: Users, roles: [...ADMINS, ROLES.HEAD_MANAGER] },
       // Beside Users on purpose: that screen says who exists and which role
       // they hold, this one says what a role can do. FLAT rather than a child
       // of Settings — `isActiveHref` treats a path as owning everything nested
       // under it, so /app/settings/permissions would light Settings too.
       { label: 'Permissions', href: '/app/permissions', icon: ShieldCheck, roles: ADMINS },
-      { label: 'Counselors', href: '/app/counselors', icon: Users, roles: [...ADMINS, ROLES.HEAD_MANAGER] },
       { label: 'Approvals', href: '/app/approval-requests', icon: CheckSquare, roles: [...ADMINS, ROLES.HEAD_MANAGER] },
       { label: 'Commissions', href: '/app/commissions', icon: DollarSign, roles: ADMINS },
-      { label: 'Lead Sources', href: '/app/lead-sources', icon: TrendingUp, roles: ADMINS },
       { label: 'Settings', href: '/app/settings', icon: Settings, roles: ADMINS },
     ],
   },
@@ -188,7 +188,7 @@ const NAV_SECTIONS: NavSection[] = [
 /**
  * An entry owns its own path and everything nested UNDER it, but not paths
  * that merely start with the same letters: the trailing slash is what keeps
- * /app/users from lighting up on /app/users-something. The Documents group
+ * /app/team from lighting up on /app/team-something. The Documents group
  * leans on the nested half of this for /app/documents/expiry and the transfer
  * detail routes, so narrowing it to an exact match would unlight those.
  */

@@ -230,12 +230,6 @@ class DefaultsAreTheOldBehaviourTests(MatrixFixture):
     # (capability, path, roles that may GET, roles that may POST, body)
     ENDPOINTS = (
         (
-            Capability.MANAGE_LEAD_SOURCES, 'lead-sources/',
-            {Role.DEV_ADMIN, Role.COMPANY_ADMIN},
-            {Role.DEV_ADMIN, Role.COMPANY_ADMIN},
-            lambda t, role: {'name': f'Source {role}', 'type': 'Referral'},
-        ),
-        (
             Capability.MANAGE_COMMISSIONS, 'agents/',
             {Role.DEV_ADMIN, Role.COMPANY_ADMIN},
             {Role.DEV_ADMIN, Role.COMPANY_ADMIN},
@@ -397,7 +391,7 @@ class DefaultTableIntegrityTests(TestCase):
         expected = {
             'manageCompanies', 'manageBranches', 'manageUsers', 'viewAnalytics',
             'viewEarnings', 'manageCommissions', 'manageSettings',
-            'reviewApprovals', 'manageCounselors', 'manageLeadSources',
+            'reviewApprovals', 'manageCounselors',
             'manageRefunds', 'deleteRecords',
         }
         self.assertEqual(set(Capability.values), expected)
@@ -411,24 +405,21 @@ class DefaultTableIntegrityTests(TestCase):
 class GrantAndRevokeChangeBehaviourTests(MatrixFixture):
     """The table is consulted, and the cache does not outlive the change."""
 
-    def test_granting_lead_sources_lets_an_employee_read_them(self):
+    def test_granting_refunds_lets_an_employee_file_one(self):
         employee = self.role_client(Role.EMPLOYEE)
+        body = {
+            'student': self.registration.pk, 'amount': '100.00',
+            'reason': 'Filed by employee',
+        }
         self.assertStatus(
-            employee.get('/api/lead-sources/'), status.HTTP_403_FORBIDDEN,
-            'employee before the grant',
+            employee.post('/api/refunds/', body, format='json'),
+            status.HTTP_403_FORBIDDEN, 'employee before the grant',
         )
 
-        self.grant(Role.EMPLOYEE, Capability.MANAGE_LEAD_SOURCES)
+        self.grant(Role.EMPLOYEE, Capability.MANAGE_REFUNDS)
 
         self.assertStatus(
-            employee.get('/api/lead-sources/'), status.HTTP_200_OK,
-            'employee after the grant',
-        )
-        self.assertStatus(
-            employee.post(
-                '/api/lead-sources/', {'name': 'Walk-in', 'type': 'Referral'},
-                format='json',
-            ),
+            employee.post('/api/refunds/', body, format='json'),
             status.HTTP_201_CREATED, 'employee create after the grant',
         )
 
@@ -485,28 +476,28 @@ class GrantAndRevokeChangeBehaviourTests(MatrixFixture):
 
     def test_returning_a_cell_to_null_restores_the_default(self):
         employee = self.role_client(Role.EMPLOYEE)
-        self.grant(Role.EMPLOYEE, Capability.MANAGE_LEAD_SOURCES)
+        self.grant(Role.EMPLOYEE, Capability.VIEW_ANALYTICS)
         self.assertStatus(
-            employee.get('/api/lead-sources/'), status.HTTP_200_OK, 'after the grant',
+            employee.get('/api/analytics/funnel/'), status.HTTP_200_OK, 'after the grant',
         )
 
-        self.grant(Role.EMPLOYEE, Capability.MANAGE_LEAD_SOURCES, allowed=None)
+        self.grant(Role.EMPLOYEE, Capability.VIEW_ANALYTICS, allowed=None)
 
         self.assertEqual(
             RolePermission.objects.filter(
                 company=self.company, role=Role.EMPLOYEE,
-                capability=Capability.MANAGE_LEAD_SOURCES,
+                capability=Capability.VIEW_ANALYTICS,
             ).count(),
             0,
             'null must DELETE the override, not store a false',
         )
         self.assertStatus(
-            employee.get('/api/lead-sources/'), status.HTTP_403_FORBIDDEN,
+            employee.get('/api/analytics/funnel/'), status.HTTP_403_FORBIDDEN,
             'after returning to the default',
         )
 
     def test_reset_clears_every_override(self):
-        self.grant(Role.EMPLOYEE, Capability.MANAGE_LEAD_SOURCES)
+        self.grant(Role.EMPLOYEE, Capability.MANAGE_REFUNDS)
         self.grant(Role.EMPLOYEE, Capability.VIEW_ANALYTICS)
         self.assertEqual(RolePermission.objects.count(), 2)
 
@@ -514,7 +505,7 @@ class GrantAndRevokeChangeBehaviourTests(MatrixFixture):
         self.assertStatus(response, status.HTTP_200_OK, 'reset')
         self.assertEqual(RolePermission.objects.count(), 0)
         self.assertStatus(
-            self.role_client(Role.EMPLOYEE).get('/api/lead-sources/'),
+            self.role_client(Role.EMPLOYEE).get('/api/analytics/funnel/'),
             status.HTTP_403_FORBIDDEN, 'employee after the reset',
         )
 
@@ -527,30 +518,30 @@ class GrantAndRevokeChangeBehaviourTests(MatrixFixture):
         provably has not.
         """
         self.assertFalse(
-            capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['manageLeadSources'],
+            capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['viewAnalytics'],
         )
         self.assertIsNotNone(
             cache.get(capabilities.cache_key(self.company.pk)),
             'the read above should have populated the cache',
         )
 
-        self.grant(Role.EMPLOYEE, Capability.MANAGE_LEAD_SOURCES)
+        self.grant(Role.EMPLOYEE, Capability.VIEW_ANALYTICS)
 
         self.assertTrue(
-            capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['manageLeadSources'],
+            capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['viewAnalytics'],
         )
 
     def test_a_direct_model_write_also_invalidates(self):
         """The Django admin and shell are writers too."""
         self.assertFalse(
-            capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['manageLeadSources'],
+            capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['viewAnalytics'],
         )
         RolePermission.objects.create(
             company=self.company, role=Role.EMPLOYEE,
-            capability=Capability.MANAGE_LEAD_SOURCES, allowed=True,
+            capability=Capability.VIEW_ANALYTICS, allowed=True,
         )
         self.assertTrue(
-            capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['manageLeadSources'],
+            capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['viewAnalytics'],
             'post_save on RolePermission must drop the cached matrix',
         )
 
@@ -558,12 +549,12 @@ class GrantAndRevokeChangeBehaviourTests(MatrixFixture):
         employee = self.role_client(Role.EMPLOYEE)
         before = employee.get(MINE_URL)
         self.assertStatus(before, status.HTTP_200_OK, 'GET mine')
-        self.assertNotIn('manageLeadSources', before.data['capabilities'])
+        self.assertNotIn('viewAnalytics', before.data['capabilities'])
 
-        self.grant(Role.EMPLOYEE, Capability.MANAGE_LEAD_SOURCES)
+        self.grant(Role.EMPLOYEE, Capability.VIEW_ANALYTICS)
 
         after = employee.get(MINE_URL)
-        self.assertIn('manageLeadSources', after.data['capabilities'])
+        self.assertIn('viewAnalytics', after.data['capabilities'])
         self.assertEqual(after.data['role'], Role.EMPLOYEE)
 
 
@@ -672,18 +663,18 @@ class DelegationGuardTests(MatrixFixture):
         # Taken away by the platform operator, so the admin is not simply
         # undoing their own edit.
         self.grant(
-            Role.COMPANY_ADMIN, Capability.MANAGE_LEAD_SOURCES, allowed=False,
+            Role.COMPANY_ADMIN, Capability.MANAGE_COMMISSIONS, allowed=False,
             actor=self.users[Role.DEV_ADMIN], company=self.company,
         )
-        self.assertFalse(capabilities.role_has(admin, Capability.MANAGE_LEAD_SOURCES))
+        self.assertFalse(capabilities.role_has(admin, Capability.MANAGE_COMMISSIONS))
 
         response = self.put_changes(admin, [{
-            'role': Role.HEAD_MANAGER, 'capability': 'manageLeadSources',
+            'role': Role.HEAD_MANAGER, 'capability': 'manageCommissions',
             'allowed': True,
         }])
         self.assertRefused(response, 'does not hold it')
         self.assertFalse(
-            capabilities.resolve(self.company.pk)[Role.HEAD_MANAGER]['manageLeadSources'],
+            capabilities.resolve(self.company.pk)[Role.HEAD_MANAGER]['manageCommissions'],
         )
 
         # Revoking something you do not hold is not escalation, and stays legal.
@@ -729,7 +720,7 @@ class DelegationGuardTests(MatrixFixture):
         leaves a state nobody chose.
         """
         response = self.put_changes(self.users[Role.COMPANY_ADMIN], [
-            {'role': Role.HEAD_MANAGER, 'capability': 'manageLeadSources', 'allowed': True},
+            {'role': Role.HEAD_MANAGER, 'capability': 'manageCommissions', 'allowed': True},
             {'role': Role.EMPLOYEE, 'capability': 'manageUsers', 'allowed': True},
         ])
         self.assertRefused(response)
@@ -757,7 +748,7 @@ class MatrixEndpointAccessTests(MatrixFixture):
     def test_only_manage_settings_holders_can_write_the_grid(self):
         allowed = {Role.DEV_ADMIN, Role.COMPANY_ADMIN}
         change = [{
-            'role': Role.HEAD_MANAGER, 'capability': 'manageLeadSources',
+            'role': Role.HEAD_MANAGER, 'capability': 'manageCommissions',
             'allowed': True,
         }]
         for role in sorted(capabilities.ALL_ROLES):
@@ -775,14 +766,14 @@ class MatrixEndpointAccessTests(MatrixFixture):
     def test_the_grid_reports_defaults_versus_overrides(self):
         response = self.client_for(self.users[Role.COMPANY_ADMIN]).get(MATRIX_URL)
         self.assertStatus(response, status.HTTP_200_OK, 'GET the grid')
-        cell = response.data['matrix'][Role.HEAD_MANAGER]['manageLeadSources']
+        cell = response.data['matrix'][Role.HEAD_MANAGER]['manageCommissions']
         self.assertEqual(cell['source'], 'default')
         self.assertFalse(cell['allowed'])
 
-        self.grant(Role.HEAD_MANAGER, Capability.MANAGE_LEAD_SOURCES)
+        self.grant(Role.HEAD_MANAGER, Capability.MANAGE_COMMISSIONS)
 
         after = self.client_for(self.users[Role.COMPANY_ADMIN]).get(MATRIX_URL)
-        cell = after.data['matrix'][Role.HEAD_MANAGER]['manageLeadSources']
+        cell = after.data['matrix'][Role.HEAD_MANAGER]['manageCommissions']
         self.assertEqual(cell['source'], 'override')
         self.assertTrue(cell['allowed'])
 
@@ -804,7 +795,7 @@ class MatrixEndpointAccessTests(MatrixFixture):
     def test_a_dev_admin_must_name_a_company_to_write(self):
         response = self.client_for(self.users[Role.DEV_ADMIN]).put(MATRIX_URL, {
             'changes': [{
-                'role': Role.EMPLOYEE, 'capability': 'manageLeadSources',
+                'role': Role.EMPLOYEE, 'capability': 'viewAnalytics',
                 'allowed': True,
             }],
         }, format='json')
@@ -834,24 +825,24 @@ class TenantIsolationTests(MatrixFixture):
         # Warm the neighbour's matrix FIRST. If the key were shared, this is the
         # entry the grant below would go on to overwrite.
         self.assertFalse(
-            capabilities.resolve(self.other_company.pk)[Role.EMPLOYEE]['manageLeadSources'],
+            capabilities.resolve(self.other_company.pk)[Role.EMPLOYEE]['viewAnalytics'],
         )
 
-        self.grant(Role.EMPLOYEE, Capability.MANAGE_LEAD_SOURCES)
+        self.grant(Role.EMPLOYEE, Capability.VIEW_ANALYTICS)
 
         self.assertTrue(
-            capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['manageLeadSources'],
+            capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['viewAnalytics'],
         )
         self.assertFalse(
-            capabilities.resolve(self.other_company.pk)[Role.EMPLOYEE]['manageLeadSources'],
-            'company A\'s override leaked into company B',
+            capabilities.resolve(self.other_company.pk)[Role.EMPLOYEE]['viewAnalytics'],
+            "company A's override leaked into company B",
         )
         self.assertStatus(
-            self.client_for(self.other_employee).get('/api/lead-sources/'),
-            status.HTTP_403_FORBIDDEN, 'the neighbour\'s employee',
+            self.client_for(self.other_employee).get('/api/analytics/funnel/'),
+            status.HTTP_403_FORBIDDEN, "the neighbour's employee",
         )
         self.assertStatus(
-            self.role_client(Role.EMPLOYEE).get('/api/lead-sources/'),
+            self.role_client(Role.EMPLOYEE).get('/api/analytics/funnel/'),
             status.HTTP_200_OK, 'our own employee',
         )
 
@@ -881,7 +872,7 @@ class TenantIsolationTests(MatrixFixture):
         """
         response = self.put_changes(
             self.users[Role.COMPANY_ADMIN],
-            [{'role': Role.EMPLOYEE, 'capability': 'manageLeadSources', 'allowed': True}],
+            [{'role': Role.EMPLOYEE, 'capability': 'viewAnalytics', 'allowed': True}],
             company=self.other_company,
         )
         self.assertStatus(response, status.HTTP_200_OK, 'the write is accepted')

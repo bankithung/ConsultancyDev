@@ -745,7 +745,12 @@ export function StudentProfileView({ type, id }: StudentProfileViewProps) {
                 </CardHeader>
                 <CardContent className="p-3 sm:p-4">
                   {documentView === 'digital' ? (
-                    <DocumentList studentName={studentName} registrationNo={registration?.registrationNo} />
+                    <DocumentList
+                      studentName={studentName}
+                      registrationNo={registration?.registrationNo}
+                      registrationId={registration?.id}
+                      enquiryId={enquiry?.id}
+                    />
                   ) : registration ? (
                     <PhysicalDocumentList registrationId={registration.id} />
                   ) : (

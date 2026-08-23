@@ -498,6 +498,33 @@ export interface RegistrationFormProps {
   submitError?: unknown;
 }
 
+/** Registration fields holding a number that an enquiry can pre-fill. */
+type NumericPrefillField =
+  | 'class12Percentage'
+  | 'class10Percentage'
+  | 'physicsMarks'
+  | 'chemistryMarks'
+  | 'biologyMarks'
+  | 'mathsMarks'
+  | 'pcbPercentage'
+  | 'pcmPercentage'
+  | 'previousNeetMarks'
+  | 'presentNeetMarks'
+  | 'gapYearFrom'
+  | 'gapYearTo';
+
+/**
+ * DRF serialises DecimalField as a string, so an enquiry's marks and
+ * percentages arrive as `string | number` while the registration schema wants
+ * a plain number. Returns undefined for anything unparseable, so a junk value
+ * leaves the form default alone instead of writing NaN into the field.
+ */
+const toNumber = (value: string | number | null | undefined): number | undefined => {
+  if (value === null || value === undefined || value === '') return undefined;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
 export function RegistrationForm({
   onSubmit,
   isLoading,
@@ -561,11 +588,15 @@ export function RegistrationForm({
   /**
    * Pre-fill from the enquiry being converted.
    *
-   * Only the fields `EnquirySerializer` actually returns are mapped. The old
-   * build also read `schoolBoard`, `class10*`, `gender`, `dob`, `caste`,
-   * `religion`, `familyPlace/State` and `gapYearFrom/To` off the enquiry --
-   * none of those exist on the Enquiry model here, so mapping them would just
-   * overwrite good values with `undefined`.
+   * `EnquirySerializer` now returns the full academic and personal profile --
+   * `date_of_birth`, `gender`, `caste`, `religion`, `family_*`, `school_*`,
+   * `class10_*`, `class12_*`, the marks and the gap-year range all have real
+   * columns. An earlier comment here claimed none of them existed and skipped
+   * them; that left the converted registration blank on fields the counsellor
+   * had already typed once, including the required date of birth.
+   *
+   * Each value is only written when the enquiry actually carries it, so a
+   * missing field leaves the form default alone rather than clearing it.
    */
   useEffect(() => {
     if (!enquiryId) return;
@@ -590,6 +621,49 @@ export function RegistrationForm({
         if (enquiry.stream) setValue('stream', enquiry.stream);
         setValue('gapYear', Boolean(enquiry.gapYear));
         setValue('collegeDropout', Boolean(enquiry.collegeDropout));
+
+        // Required on the registration, so leaving it blank blocked the save.
+        if (enquiry.dateOfBirth) setValue('dateOfBirth', enquiry.dateOfBirth);
+
+        if (enquiry.gender === 'Male' || enquiry.gender === 'Female' || enquiry.gender === 'Other') {
+          setValue('gender', enquiry.gender);
+        }
+        if (enquiry.caste) setValue('caste', enquiry.caste);
+        if (enquiry.religion) setValue('religion', enquiry.religion);
+        if (enquiry.familyPlace) setValue('familyPlace', enquiry.familyPlace);
+        if (enquiry.familyState) setValue('familyState', enquiry.familyState);
+
+        if (enquiry.schoolBoard) setValue('schoolBoard', enquiry.schoolBoard);
+        if (enquiry.schoolPlace) setValue('schoolPlace', enquiry.schoolPlace);
+        if (enquiry.schoolState) setValue('schoolState', enquiry.schoolState);
+        if (enquiry.class12PassingYear) setValue('class12PassingYear', enquiry.class12PassingYear);
+
+        if (enquiry.class10SchoolName) setValue('class10SchoolName', enquiry.class10SchoolName);
+        if (enquiry.class10Board) setValue('class10Board', enquiry.class10Board);
+        if (enquiry.class10Place) setValue('class10Place', enquiry.class10Place);
+        if (enquiry.class10State) setValue('class10State', enquiry.class10State);
+        if (enquiry.class10PassingYear) setValue('class10PassingYear', enquiry.class10PassingYear);
+
+        const numeric: ReadonlyArray<
+          readonly [NumericPrefillField, string | number | null | undefined]
+        > = [
+          ['class12Percentage', enquiry.class12Percentage],
+          ['class10Percentage', enquiry.class10Percentage],
+          ['physicsMarks', enquiry.physicsMarks],
+          ['chemistryMarks', enquiry.chemistryMarks],
+          ['biologyMarks', enquiry.biologyMarks],
+          ['mathsMarks', enquiry.mathsMarks],
+          ['pcbPercentage', enquiry.pcbPercentage],
+          ['pcmPercentage', enquiry.pcmPercentage],
+          ['previousNeetMarks', enquiry.previousNeetMarks],
+          ['presentNeetMarks', enquiry.presentNeetMarks],
+          ['gapYearFrom', enquiry.gapYearFrom],
+          ['gapYearTo', enquiry.gapYearTo],
+        ];
+        for (const [field, raw] of numeric) {
+          const value = toNumber(raw);
+          if (value !== undefined) setValue(field, value);
+        }
 
         const locations = enquiry.preferredLocations ?? [];
         if (locations.length > 0 && enquiry.courseInterested) {

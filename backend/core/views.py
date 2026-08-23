@@ -37,7 +37,7 @@ from .filters import (
 from .models import (
     Agent, Appointment, ApprovalRequest, Branch, Capability, Commission,
     Company, Document,
-    Enquiry, Enrollment, FollowUp, FollowUpComment, Installment, LeadSource,
+    Enquiry, Enrollment, FollowUp, FollowUpComment, Installment,
     Notification,
     Payment, Plan, RecordTransfer, Refund, Registration, Role, RolePermission,
     SignupRequest,
@@ -46,7 +46,7 @@ from .models import (
 )
 from .permissions import (
     CanCreateStaff, CanManageAgents, CanManageCommissions,
-    CanManageLeadSources, CanManageOwnCompany, CanManageRefunds,
+    CanManageOwnCompany, CanManageRefunds,
     CanManageSettings, CanManageUsers,
     CanViewCounselors, IsAuthenticatedAndActive,
     IsDevAdmin, ReadOnlyOrCompanyAdmin, ReadOnlyOrManager,
@@ -60,7 +60,7 @@ from .serializers import (
     EnquirySerializer,
     EnrollmentSerializer, FollowUpCommentSerializer, FollowUpSerializer,
     InstallmentSerializer,
-    LeadSourceSerializer, NotificationSerializer, PaymentSerializer,
+    NotificationSerializer, PaymentSerializer,
     PlanSerializer, RecordTransferSerializer, RefundSerializer,
     RegistrationSerializer, RolePermissionUpdateSerializer,
     SignupRequestSerializer, StudentDocumentSerializer,
@@ -231,7 +231,9 @@ class LogoutView(APIView):
 # ===========================================================================
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.select_related('company', 'branch').all()
+    queryset = User.objects.select_related('company', 'branch').prefetch_related(
+        'managed_managers',
+    ).all()
     serializer_class = UserSerializer
     # `is_dev_admin` and friends are properties, not fields â€” filter on `role`.
     filterset_fields = ('role', 'branch', 'is_active_employee')
@@ -696,7 +698,10 @@ class DocumentViewSet(ScopedModelViewSet):
     serializer_class = DocumentSerializer
     entity_type = 'document'
     parser_classes = (MultiPartParser, FormParser, JSONParser)
-    filterset_fields = ('status', 'branch', 'type')
+    # `registration` and `enquiry` make membership a server-side question.
+    # Without them a student's document list had to pull every page and
+    # match on the displayed name, which is not an identity.
+    filterset_fields = ('status', 'branch', 'type', 'registration', 'enquiry')
     search_fields = ('file_name', 'student_name', 'type')
     ordering_fields = ('uploaded_at', 'expiry_date')
 
@@ -953,28 +958,6 @@ class RefundViewSet(ScopedModelViewSet):
     # `date_of_birth`, which is encrypted and can never be searched).
     search_fields = ('student__student_name', 'reason')
     ordering_fields = ('created_at', 'amount', 'status', 'processed_at')
-
-
-class LeadSourceViewSet(ScopedModelViewSet):
-    """
-    The lead-source catalogue. Admin-only, read included.
-
-    `manageLeadSources` (rbac/roles.ts:102) is admin-only and this viewset
-    declared no permission class, so an employee could read AND write it.
-
-    Read is restricted too, which needed checking first: an employee would need
-    this endpoint if the enquiry form let them pick a source. It does not.
-    `Enquiry` has no `source` field (models.py:323), nothing in the enquiry
-    form references one, `SourceAnalytics` groups by `Enquiry.stream` rather
-    than by LeadSource (analytics.py:310), and `apiClient.leadSources` is
-    imported by exactly one screen — /app/lead-sources, which proxy.ts:87
-    restricts to DEV_ADMIN and COMPANY_ADMIN.
-    """
-
-    queryset = LeadSource.objects.all()
-    serializer_class = LeadSourceSerializer
-    permission_classes = [ScopedObjectPermission, CanManageLeadSources, SubscriptionActive]
-    search_fields = ('name',)
 
 
 class VisaTrackingViewSet(ScopedModelViewSet):

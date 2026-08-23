@@ -131,11 +131,14 @@ class Plan(models.Model):
     def __str__(self):
         return self.name
 
+    # Subscriptions removed: every plan is free and unlimited, so the seat and
+    # branch caps always pass. The max_* fields stay only so existing rows,
+    # serializers and migrations keep loading unchanged.
     def allows_branches(self, count):
-        return self.max_branches == 0 or count <= self.max_branches
+        return True
 
     def allows_users(self, count):
-        return self.max_users == 0 or count <= self.max_users
+        return True
 
 
 class Subscription(models.Model):
@@ -165,11 +168,11 @@ class Subscription(models.Model):
 
     @property
     def is_usable(self):
-        """Whether the tenant may currently write data."""
-        if self.status in (self.Status.CANCELLED, self.Status.EXPIRED):
-            return False
-        if self.status == self.Status.TRIALING and self.trial_ends_at:
-            return timezone.now() <= self.trial_ends_at
+        """
+        Always True. Subscriptions no longer gate anything -- every tenant has
+        unlimited access for unlimited time, whatever the status or trial
+        dates say. Kept as a property so existing callers keep working.
+        """
         return True
 
     @property
@@ -220,7 +223,6 @@ class Capability(models.TextChoices):
     MANAGE_SETTINGS = 'manageSettings', 'Manage company settings and permissions'
     REVIEW_APPROVALS = 'reviewApprovals', 'Review approval requests'
     MANAGE_COUNSELORS = 'manageCounselors', 'View counselor performance'
-    MANAGE_LEAD_SOURCES = 'manageLeadSources', 'Manage lead sources'
     MANAGE_REFUNDS = 'manageRefunds', 'File and approve refunds'
     DELETE_RECORDS = 'deleteRecords', 'Delete records directly'
 
@@ -705,6 +707,12 @@ class Document(TenantScopedModel):
     registration = models.ForeignKey(
         Registration, on_delete=models.CASCADE, null=True, blank=True, related_name='documents',
     )
+    # An enquirer has no Registration row yet, so `registration` alone cannot
+    # link their documents. Exactly one of the two is set, or neither: a
+    # document that belongs to nobody in particular is still a real document.
+    enquiry = models.ForeignKey(
+        'Enquiry', on_delete=models.CASCADE, null=True, blank=True, related_name='documents',
+    )
     expiry_date = models.DateField(blank=True, null=True, db_index=True)
 
     class Meta(TenantScopedModel.Meta):
@@ -907,26 +915,6 @@ class Refund(TenantScopedModel):
     class Meta(TenantScopedModel.Meta):
         abstract = False
         ordering = ['-created_at']
-
-
-class LeadSource(TenantScopedModel):
-    TYPE_CHOICES = (
-        ('Online', 'Online'), ('Referral', 'Referral'), ('Walk-in', 'Walk-in'),
-        ('Event', 'Event'), ('Agent', 'Agent'), ('Other', 'Other'),
-    )
-
-    name = models.CharField(max_length=150)
-    type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='Online')
-    total_leads = models.PositiveIntegerField(default=0)
-    conversion_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
-    status = models.CharField(max_length=20, default='Active')
-
-    class Meta(TenantScopedModel.Meta):
-        abstract = False
-        ordering = ['name']
-        constraints = [
-            models.UniqueConstraint(fields=['company', 'name'], name='uniq_leadsource_per_company'),
-        ]
 
 
 class VisaTracking(TenantScopedModel):

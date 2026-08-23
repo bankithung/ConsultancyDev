@@ -99,7 +99,6 @@ export const CAN = {
   manageSettings: [ROLES.DEV_ADMIN, ROLES.COMPANY_ADMIN],
   reviewApprovals: [ROLES.DEV_ADMIN, ROLES.COMPANY_ADMIN, ROLES.HEAD_MANAGER],
   manageCounselors: [ROLES.DEV_ADMIN, ROLES.COMPANY_ADMIN, ROLES.HEAD_MANAGER],
-  manageLeadSources: [ROLES.DEV_ADMIN, ROLES.COMPANY_ADMIN],
   manageRefunds: [ROLES.DEV_ADMIN, ROLES.COMPANY_ADMIN, ROLES.HEAD_MANAGER, ROLES.BRANCH_MANAGER],
   deleteRecords: [ROLES.DEV_ADMIN, ROLES.COMPANY_ADMIN, ROLES.HEAD_MANAGER, ROLES.BRANCH_MANAGER],
 } as const satisfies Record<string, readonly Role[]>;
@@ -126,7 +125,6 @@ const _serverKnowsEveryCapability: Record<Capability, CapabilityKey> = {
   manageSettings: 'manageSettings',
   reviewApprovals: 'reviewApprovals',
   manageCounselors: 'manageCounselors',
-  manageLeadSources: 'manageLeadSources',
   manageRefunds: 'manageRefunds',
   deleteRecords: 'deleteRecords',
 };

@@ -26,7 +26,7 @@ from django.utils import timezone
 from core import services
 from core.models import (
     Agent, Appointment, Branch, Company, Document, Enquiry, Enrollment,
-    FollowUp, LeadSource, Payment, Registration, Role, Task, University, User,
+    FollowUp, Payment, Registration, Role, Task, University, User,
     VisaTracking,
 )
 
@@ -141,12 +141,6 @@ class Command(BaseCommand):
                 'requirements': ['IELTS 6.5', "Bachelor's degree"], 'rating': Decimal('4.50'),
             },
         )
-        for name, ltype in [('Website', 'Online'), ('Walk-in', 'Walk-in'), ('Referral', 'Referral')]:
-            LeadSource.objects.get_or_create(
-                company=company, name=name,
-                defaults={'type': ltype, 'branch': branches['kohima'], 'created_by': staff['admin']},
-            )
-
         agent, _ = Agent.objects.get_or_create(
             company=company, name='Northeast Study Partners',
             defaults={

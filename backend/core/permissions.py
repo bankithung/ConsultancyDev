@@ -214,9 +214,8 @@ class IsCompanyAdmin(RoleRequired):
     """
     Plain role check, deliberately NOT capability-backed.
 
-    Currently unused: its two consumers (`agents/` and `lead-sources/`) moved to
-    `CanManageAgents` and `CanManageLeadSources` so an admin can configure them
-    from the permissions screen. Kept because a gate outside the capability
+    Currently unused: its consumer (`agents/`) moved to `CanManageAgents` so an
+    admin can configure it from the permissions screen. Kept because a gate outside the capability
     vocabulary is a legitimate thing to want, and this is the honest way to
     write one — hardcoded, and visibly not on the grid.
     """
@@ -314,18 +313,6 @@ class CanManageAgents(RoleRequired):
 
     capability = Capability.MANAGE_COMMISSIONS
     message = 'Your role does not permit managing agents.'
-
-
-class CanManageLeadSources(RoleRequired):
-    """
-    Lead sources, read and write.
-
-    Admin-only including reads: no enquiry form consumes this endpoint, and
-    /app/lead-sources is its only consumer.
-    """
-
-    capability = Capability.MANAGE_LEAD_SOURCES
-    message = 'Your role does not permit managing lead sources.'
 
 
 class CanViewCounselors(RoleRequired):
@@ -489,28 +476,12 @@ class CanManageRefunds(ReadOnlyOrCapability):
 
 class SubscriptionActive(permissions.BasePermission):
     """
-    Block writes for tenants whose subscription has lapsed. Reads stay open so
-    a lapsed customer can still export their data.
+    No-op. Subscription gating was removed -- every tenant gets free, unlimited
+    access for unlimited time, so billing state never blocks a write. Kept as a
+    class because many viewsets list it in permission_classes.
     """
 
     message = 'Your subscription is inactive. Please renew to continue.'
 
     def has_permission(self, request, view):
-        if request.method in SAFE_METHODS:
-            return True
-        user = request.user
-        if not user or not user.is_authenticated or user.is_dev_admin:
-            return True
-        company = getattr(user, 'company', None)
-        if company is None:
-            # A non-dev-admin with no company cannot write anything anyway;
-            # scope_queryset already returns nothing for them.
-            return False
-        subscription = getattr(company, 'subscription', None)
-        if subscription is None:
-            # Fail closed. provision_company always creates a subscription, so
-            # a company without one was made outside that path (fixture, admin,
-            # data migration) and should not silently get unlimited writes.
-            self.message = 'This company has no active subscription.'
-            return False
-        return subscription.is_usable
+        return True

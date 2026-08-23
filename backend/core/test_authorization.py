@@ -43,7 +43,7 @@ from rest_framework.test import APIClient
 
 from core import services
 from core.models import (
-    Agent, Branch, Commission, Company, Enquiry, LeadSource, Plan, Refund,
+    Agent, Branch, Commission, Company, Enquiry, Plan, Refund,
     Registration, Role,
 )
 from core.urls import router
@@ -169,16 +169,6 @@ ENDPOINTS = (
         },
     ),
     Rule(
-        capability='manageLeadSources',
-        path='lead-sources/',
-        # Admin-only including READ. Verified against the frontend first:
-        # `Enquiry` has no source field, no enquiry form reads this endpoint,
-        # and /app/lead-sources is the only consumer.
-        readers=ADMINS,
-        writers=ADMINS,
-        body=lambda t, role: {'name': f'Source {role}', 'type': 'Referral'},
-    ),
-    Rule(
         # No CAN entry governs the university catalogue; the rule is the
         # pre-existing `ReadOnlyOrManager` and this pins it.
         capability='(none — ReadOnlyOrManager)',
@@ -220,12 +210,6 @@ DETAIL_RULES = (
         # Approving a refund is the step that releases the money.
         payload={'status': Refund.Status.APPROVED},
         writers=MANAGERS_UP,
-    ),
-    DetailRule(
-        capability='manageLeadSources',
-        url=lambda t: f'/api/lead-sources/{t.lead_source.pk}/',
-        payload={'name': 'Renamed source'},
-        writers=ADMINS,
     ),
     DetailRule(
         capability='manageCommissions',
@@ -362,7 +346,6 @@ class AuthorizationMatrixTests(TestCase):
         cls.commission = Commission.objects.create(
             agent=cls.agent, commission_amount=Decimal('750.00'), **scope,
         )
-        cls.lead_source = LeadSource.objects.create(name='Fixture Source', **scope)
 
     def setUp(self):
         super().setUp()

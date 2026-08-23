@@ -31,6 +31,12 @@ interface DocumentUploadModalProps {
   onClose: () => void;
   studentName: string;
   registrationNo?: string;
+  /**
+   * The record to attach the upload to. `registrationNo` is a human
+   * reference, not a key -- it cannot link anything on its own.
+   */
+  registrationId?: string;
+  enquiryId?: string;
 }
 
 /**
@@ -39,7 +45,14 @@ interface DocumentUploadModalProps {
  * Deliberately not react-hook-form: the payload is a `File` plus three scalars,
  * and RHF's uncontrolled file handling buys nothing here.
  */
-export function DocumentUploadModal({ open, onClose, studentName, registrationNo }: DocumentUploadModalProps) {
+export function DocumentUploadModal({
+  open,
+  onClose,
+  studentName,
+  registrationNo,
+  registrationId,
+  enquiryId,
+}: DocumentUploadModalProps) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -61,8 +74,10 @@ export function DocumentUploadModal({ open, onClose, studentName, registrationNo
       apiClient.documents.upload({
         file: chosen,
         type,
-        studentName,
-        registrationNo,
+        // Prefer the registration: it is the record documents hang off once a
+        // student has one. The enquiry link covers the stage before that.
+        registration: registrationId,
+        enquiry: registrationId ? undefined : enquiryId,
         expiryDate: expiryDate || undefined,
         status: 'IN',
       }),

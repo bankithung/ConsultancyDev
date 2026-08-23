@@ -186,6 +186,11 @@ export interface User {
   /** False for a deactivated employee; such accounts are refused at login. */
   is_active_employee: boolean;
   last_login: string | null;
+  /**
+   * Branch managers this head manager oversees. Read-only here; the admin
+   * sets it on the user form. Empty for every other role.
+   */
+  managed_managers?: number[];
 }
 
 /**
@@ -224,7 +229,6 @@ export type CapabilityKey =
   | 'manageSettings'
   | 'reviewApprovals'
   | 'manageCounselors'
-  | 'manageLeadSources'
   | 'manageRefunds'
   | 'deleteRecords';
 
@@ -695,6 +699,13 @@ export interface Document {
   uploadedAt: string; // ISO
   studentName?: string;
   registrationNo?: string;
+  /**
+   * Which student this document actually belongs to. Exactly one is set, or
+   * neither. `studentName` is a denormalised copy the server derives from
+   * whichever link is present -- read it for display, never as the identity.
+   */
+  registration?: string | null;
+  enquiry?: string | null;
   expiryDate?: string;
   fileSize?: number;
   mimeType?: string;
@@ -936,15 +947,6 @@ export interface RefundInput {
   amount: number | string;
   reason?: string;
   status?: RefundStatus;
-}
-
-export interface LeadSource {
-  id: string;
-  name: string;
-  type: string;
-  totalLeads: number;
-  conversionRate: number;
-  isActive: boolean;
 }
 
 export interface VisaTracking {

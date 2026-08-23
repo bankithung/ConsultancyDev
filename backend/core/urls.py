@@ -8,7 +8,7 @@ from .views import (
     CommissionViewSet, CompanyViewSet, DocumentViewSet, EnquiryViewSet,
     FollowUpCommentViewSet,
     EnrollmentViewSet, FollowUpViewSet, HealthView, InstallmentViewSet,
-    LeadSourceViewSet, LoginView, LogoutView, MyCapabilitiesView,
+    LoginView, LogoutView, MyCapabilitiesView,
     NotificationViewSet,
     PaymentViewSet, PlanViewSet, RecordTransferViewSet, RefundViewSet,
     RegistrationViewSet, RolePermissionView, SignupRequestViewSet,
@@ -43,7 +43,6 @@ router.register(r'notifications', NotificationViewSet, basename='notification')
 router.register(r'agents', AgentViewSet, basename='agent')
 router.register(r'commissions', CommissionViewSet, basename='commission')
 router.register(r'refunds', RefundViewSet, basename='refund')
-router.register(r'lead-sources', LeadSourceViewSet, basename='leadsource')
 router.register(r'visa-tracking', VisaTrackingViewSet, basename='visatracking')
 router.register(r'follow-ups', FollowUpViewSet, basename='followup')
 

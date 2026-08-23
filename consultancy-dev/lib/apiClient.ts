@@ -13,7 +13,6 @@ import type {
   EnrollmentInput,
   FollowUp,
   FollowUpComment,
-  LeadSource,
   MyCapabilities,
   Notification,
   PageParams,
@@ -378,6 +377,8 @@ interface RawDocument {
   uploaded_by_name?: string;
   student_name?: string;
   registration_no?: string;
+  registration?: string | null;
+  enquiry?: string | null;
   expiry_date?: string;
   file_size?: number;
   mime_type?: string;
@@ -392,6 +393,8 @@ const mapDocument = (d: RawDocument): Document => ({
   uploadedAt: d.uploaded_at,
   studentName: d.student_name,
   registrationNo: d.registration_no,
+  registration: d.registration ?? null,
+  enquiry: d.enquiry ?? null,
   expiryDate: d.expiry_date,
   fileSize: d.file_size,
   mimeType: d.mime_type,
@@ -549,21 +552,6 @@ const mapAgent = (a: RawAgent): Agent => ({
   totalEarned: a.total_earned,
   pendingAmount: a.pending_amount,
   studentsReferred: a.students_referred,
-});
-
-interface RawLeadSource {
-  id: string;
-  name: string;
-  type: string;
-  isActive: boolean;
-  total_leads: number;
-  conversion_rate: number;
-}
-
-const mapLeadSource = (l: RawLeadSource): LeadSource => ({
-  ...l,
-  totalLeads: l.total_leads,
-  conversionRate: l.conversion_rate,
 });
 
 interface RawVisaTracking {
@@ -823,7 +811,13 @@ export interface DocumentUploadInput {
   file: File;
   type: string;
   studentName?: string;
-  registrationNo?: string;
+  /**
+   * The link. Send one of these, not a typed-in name: the server derives
+   * `student_name` from whichever is set, so a document can no longer claim
+   * a student it is not attached to.
+   */
+  registration?: string;
+  enquiry?: string;
   expiryDate?: string;
   status?: Document['status'];
 }
@@ -1149,8 +1143,11 @@ export const apiClient = {
       formData.append('file', input.file);
       formData.append('type', input.type);
       formData.append('status', input.status ?? 'IN');
-      if (input.studentName) formData.append('student_name', input.studentName);
-      if (input.registrationNo) formData.append('registration_no', input.registrationNo);
+      // `registration_no` was sent here and was never a field on
+      // DocumentSerializer, so DRF dropped it and every upload landed
+      // unlinked. The server derives student_name from the FK now.
+      if (input.registration) formData.append('registration', input.registration);
+      if (input.enquiry) formData.append('enquiry', input.enquiry);
       if (input.expiryDate) formData.append('expiry_date', input.expiryDate);
 
       const res = await api.post<RawDocument>('documents/', formData);
@@ -1530,34 +1527,6 @@ export const apiClient = {
         { document_ids: documentIds },
       );
       return res.data;
-    },
-  },
-
-  leadSources: {
-    list: (params: PageParams = {}): Promise<Paginated<LeadSource>> =>
-      fetchPageMapped<RawLeadSource, LeadSource>('lead-sources/', mapLeadSource, params),
-    create: async (data: Omit<LeadSource, 'id'>): Promise<LeadSource> => {
-      const res = await api.post<RawLeadSource>('lead-sources/', {
-        name: data.name,
-        type: data.type,
-        isActive: data.isActive,
-        total_leads: data.totalLeads,
-        conversion_rate: data.conversionRate,
-      });
-      return mapLeadSource(res.data);
-    },
-    update: async (id: string, data: Partial<LeadSource>): Promise<LeadSource> => {
-      const res = await api.patch<RawLeadSource>(`lead-sources/${id}/`, {
-        name: data.name,
-        type: data.type,
-        isActive: data.isActive,
-        total_leads: data.totalLeads,
-        conversion_rate: data.conversionRate,
-      });
-      return mapLeadSource(res.data);
-    },
-    delete: async (id: string): Promise<void> => {
-      await api.delete(`lead-sources/${id}/`);
     },
   },
 

@@ -118,7 +118,7 @@ DEFAULT_PLAN_SLUG = 'starter'
 def ensure_default_plans():
     """Idempotently create the built-in plans."""
     defaults = [
-        ('Starter', 'starter', 0, 1, 5, 0),
+        ('Starter', 'starter', 0, 0, 0, 0),
         ('Growth', 'growth', 2999, 5, 25, 1),
         ('Scale', 'scale', 7999, 0, 0, 2),
     ]
@@ -135,7 +135,7 @@ def ensure_default_plans():
 @transaction.atomic
 def provision_company(name, plan=None, trial_days=14, **company_fields):
     """
-    Create a company with its first branch and a trialing subscription.
+    Create a company with its first branch and a free, unlimited subscription.
 
     Every company gets a default branch so that records created before any
     branch is configured still have somewhere to live.
@@ -151,8 +151,8 @@ def provision_company(name, plan=None, trial_days=14, **company_fields):
         Subscription.objects.create(
             company=company,
             plan=plan,
-            status=Subscription.Status.TRIALING,
-            trial_ends_at=timezone.now() + timezone.timedelta(days=trial_days),
+            status=Subscription.Status.ACTIVE,
+            trial_ends_at=None,
         )
     return company, branch
 

@@ -16,12 +16,13 @@ from django.db import transaction
 from django.db.models import Q
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.validators import UniqueTogetherValidator
 
 from . import capabilities
 from .models import (
     Agent, Appointment, ApprovalRequest, Branch, Capability, Commission,
     Company, Document,
-    Enquiry, Enrollment, FollowUp, FollowUpComment, Installment, LeadSource,
+    Enquiry, Enrollment, FollowUp, FollowUpComment, Installment,
     Notification,
     Payment, Plan, RecordTransfer, Refund, Registration, Role, RolePermission,
     SignupRequest,
@@ -46,6 +47,65 @@ class ScopedSerializer(serializers.ModelSerializer):
 
     def get_owner_name(self, obj):
         return obj.owner.get_full_name() or obj.owner.username if obj.owner else 'â€”'
+
+
+
+
+class _OptionalRefUniqueTogetherValidator(UniqueTogetherValidator):
+    """
+    Uniqueness check that stands down when the reference number is absent.
+
+    The stock validator first demands every constrained field be present
+    (enforce_required_fields) and then indexes attrs by each of them, so a
+    payload without the reference cannot get past it either way: neutralising
+    only the required-check just moves the failure to a KeyError.
+
+    Skipping it loses nothing, because on this serializer the check could
+    never fire: `company` is read-only, so DRF injects it as None via
+    _read_only_defaults(). filter_queryset then looks for `company IS NULL`,
+    which matches no real row, and DRF skips the comparison outright when any
+    checked value is None. The validator only ever enforced 'required'.
+
+    Uniqueness is still guaranteed -- by the database constraint, which
+    surfaces as a 409 rather than a 400.
+    """
+
+    def __call__(self, attrs, serializer):
+        for field_name in self.fields:
+            if serializer.fields[field_name].source not in attrs:
+                return
+        super().__call__(attrs, serializer)
+
+
+class ServerAssignedRefMixin:
+    """
+    For records whose reference number (REG-..., ENR-...) is generated
+    server-side by the viewset's perform_create when the client omits it.
+
+    The model constrains ('company', <ref>) to be unique, so DRF builds a
+    UniqueTogetherValidator from that constraint, and it runs during
+    validation -- long before perform_create can generate anything. Every
+    create that relied on generation therefore failed with
+    "<ref>: This field is required."
+
+    perform_create already tried to fix this and could not: it runs too late.
+    """
+
+    REF_FIELDS = ()
+
+    def get_unique_together_validators(self):
+        return [
+            _OptionalRefUniqueTogetherValidator(
+                queryset=validator.queryset,
+                fields=validator.fields,
+                message=validator.message,
+                condition_fields=getattr(validator, 'condition_fields', None),
+                condition=getattr(validator, 'condition', None),
+                code=getattr(validator, 'code', None),
+            )
+            if set(self.REF_FIELDS) & set(validator.fields) else validator
+            for validator in super().get_unique_together_validators()
+        ]
 
 
 # ===========================================================================
@@ -160,10 +220,11 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'role_display', 'company', 'company_name', 'branch',
             'branch_name', 'phone', 'avatar', 'is_active', 'is_active_employee',
-            'last_login',
+            'last_login', 'managed_managers',
         )
         read_only_fields = (
             'role', 'company', 'branch', 'is_active', 'is_active_employee', 'last_login',
+            'managed_managers',
         )
 
     def get_full_name(self, obj):
@@ -179,7 +240,10 @@ class UserAdminSerializer(UserSerializer):
     )
 
     class Meta(UserSerializer.Meta):
-        fields = UserSerializer.Meta.fields + ('password', 'managed_managers')
+        # `managed_managers` is already on the parent (read-only there); this
+        # serializer redeclares it above as writable, so it must not be added
+        # to the tuple a second time.
+        fields = UserSerializer.Meta.fields + ('password',)
         # Deliberately NARROWER than the parent's read-only set: an admin must
         # be able to set `role` and `branch`. This serializer is therefore only
         # ever handed to a caller for whom `can_manage_users` is true â€” see
@@ -521,7 +585,9 @@ class EnquirySerializer(ScopedSerializer):
         read_only_fields = SCOPE_READ_ONLY
 
 
-class RegistrationSerializer(ScopedSerializer):
+class RegistrationSerializer(ServerAssignedRefMixin, ScopedSerializer):
+    REF_FIELDS = ('registration_no',)
+
     enquiry_candidate = serializers.CharField(source='enquiry.candidate_name', read_only=True)
     # Server-assigned when omitted (services.next_reference_number).
     registration_no = serializers.CharField(required=False, allow_blank=True)
@@ -560,7 +626,9 @@ class InstallmentSerializer(serializers.ModelSerializer):
         read_only_fields = ('enrollment',)
 
 
-class EnrollmentSerializer(ScopedSerializer):
+class EnrollmentSerializer(ServerAssignedRefMixin, ScopedSerializer):
+    REF_FIELDS = ('enrollment_no',)
+
     student_name = serializers.CharField(source='student.student_name', read_only=True)
     # Server-assigned when omitted (services.next_reference_number).
     enrollment_no = serializers.CharField(required=False, allow_blank=True)
@@ -621,7 +689,7 @@ class DocumentSerializer(ScopedSerializer):
         model = Document
         fields = (
             'id', 'file_name', 'file', 'file_size', 'content_type', 'type',
-            'status', 'uploaded_at', 'student_name', 'registration',
+            'status', 'uploaded_at', 'student_name', 'registration', 'enquiry',
             'expiry_date', 'download_url', 'is_encrypted',
             'company', 'company_name', 'branch', 'branch_name',
             'created_by', 'created_by_name', 'owner', 'owner_name',
@@ -630,6 +698,47 @@ class DocumentSerializer(ScopedSerializer):
         read_only_fields = SCOPE_READ_ONLY + (
             'file_size', 'content_type', 'uploaded_at', 'is_encrypted',
         )
+
+    def validate_registration(self, value):
+        request = self.context['request']
+        if not request.user.is_dev_admin and value.company_id != request.user.company_id:
+            raise serializers.ValidationError('That student does not exist.')
+        return value
+
+    def validate_enquiry(self, value):
+        request = self.context['request']
+        if not request.user.is_dev_admin and value.company_id != request.user.company_id:
+            raise serializers.ValidationError('That student does not exist.')
+        return value
+
+    def validate(self, attrs):
+        """
+        Resolve `student_name` from the link rather than from the client.
+
+        The upload form used to post a free-text name alongside a
+        `registration_no` that was never a field here, so DRF dropped the
+        reference and kept the name -- every document arrived unlinked, and the
+        name it carried could drift from the record it claimed to describe.
+        Deriving it here keeps the column useful for list and search without
+        letting it contradict the row it points at.
+        """
+        attrs = super().validate(attrs)
+
+        registration = attrs.get('registration', getattr(self.instance, 'registration', None))
+        enquiry = attrs.get('enquiry', getattr(self.instance, 'enquiry', None))
+
+        if registration and enquiry:
+            raise serializers.ValidationError(
+                'A document belongs to one student: name a registration or an '
+                'enquiry, not both.'
+            )
+
+        if registration:
+            attrs['student_name'] = registration.student_name
+        elif enquiry:
+            attrs['student_name'] = enquiry.candidate_name
+
+        return attrs
 
     def get_download_url(self, obj):
         if not obj.file:
@@ -778,18 +887,6 @@ class RefundSerializer(ScopedSerializer):
         fields = (
             'id', 'student', 'student_name', 'payment', 'amount', 'reason',
             'status', 'processed_at',
-            'company', 'company_name', 'branch', 'branch_name',
-            'created_by', 'created_by_name', 'owner', 'owner_name',
-            'created_at', 'updated_at',
-        )
-        read_only_fields = SCOPE_READ_ONLY
-
-
-class LeadSourceSerializer(ScopedSerializer):
-    class Meta:
-        model = LeadSource
-        fields = (
-            'id', 'name', 'type', 'total_leads', 'conversion_rate', 'status',
             'company', 'company_name', 'branch', 'branch_name',
             'created_by', 'created_by_name', 'owner', 'owner_name',
             'created_at', 'updated_at',

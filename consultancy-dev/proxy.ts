@@ -79,7 +79,11 @@ function getPublicKey(): Promise<CryptoKey | null> {
 const routeAccess: ReadonlyArray<readonly [string, readonly Role[]]> = [
     ['/app/dev-tools', ['DEV_ADMIN']],
     ['/app/companies', ['DEV_ADMIN']],
-    ['/app/users', ['DEV_ADMIN', 'COMPANY_ADMIN']],
+    // Reading the roster is wider than editing it: `/app/team` replaced both
+    // `/app/users` (admins) and `/app/counselors` (admins + head manager), so
+    // the gate is the wider of the two. Every write on the screen is still
+    // behind `manageUsers`, which is floored at company admin.
+    ['/app/team', ['DEV_ADMIN', 'COMPANY_ADMIN', 'HEAD_MANAGER']],
     // The screen that decides what every other role can do. Gated here as well
     // as by RoleRoute so a direct URL entry never renders it, and by
     // `CanManageSettings` server-side, which is the only one that counts.
@@ -88,7 +92,6 @@ const routeAccess: ReadonlyArray<readonly [string, readonly Role[]]> = [
     ['/app/earnings', ['DEV_ADMIN', 'COMPANY_ADMIN']],
     ['/app/commissions', ['DEV_ADMIN', 'COMPANY_ADMIN']],
     ['/app/settings', ['DEV_ADMIN', 'COMPANY_ADMIN']],
-    ['/app/lead-sources', ['DEV_ADMIN', 'COMPANY_ADMIN']],
     ['/app/reports', ['DEV_ADMIN', 'COMPANY_ADMIN', 'HEAD_MANAGER', 'BRANCH_MANAGER']],
     ['/app/analytics', ['DEV_ADMIN', 'COMPANY_ADMIN', 'HEAD_MANAGER', 'BRANCH_MANAGER']],
 ];

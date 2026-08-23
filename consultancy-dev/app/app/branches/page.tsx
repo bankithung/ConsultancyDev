@@ -2,200 +2,255 @@
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Building2, MapPin, Pencil, Plus, Power, Search, Users } from 'lucide-react';
-import { Card } from '@/components/ui/card';
+import { ArrowUpDown, Building2, MapPin, Pencil, Plus, Power, Search, Users } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { Modal } from '@/components/common/Modal';
 import { PaginationBar } from '@/components/common/PaginationBar';
-import { EmptyState, ErrorBanner, ErrorState, InlineSpinner, LoadingState } from '@/components/common/states';
+import { EmptyState, ErrorBanner, ErrorState, LoadingState } from '@/components/common/states';
 import { RoleRoute } from '@/components/rbac/RoleGate';
 import { CAN } from '@/components/rbac/roles';
 import { apiClient } from '@/lib/apiClient';
-import { getApiFieldErrors } from '@/lib/api';
 import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
 import { useDebounce } from '@/hooks/useDebounce';
 import type { Branch } from '@/lib/types';
 
+import { BranchFormDrawer } from './BranchFormDrawer';
+
 /**
+ * Branches — one panel: toolbar, a summary strip, the table, pagination.
+ *
  * There is no manager FK on Branch — branch managers are Users with
  * role=BRANCH_MANAGER and branch=<id>, which is why they are assigned from
  * /app/users rather than here. The serializer exposes them as `manager_names`.
+ *
+ * WHAT THE SERVER ACTUALLY SUPPORTS. `BranchViewSet` (backend/core/views.py)
+ * declares `search_fields = ('name', 'code', 'city')` and NOTHING else — no
+ * `filterset_class`, no `filterset_fields`. Probed against the running API:
+ * `?is_active=true`, `?is_active=false` and a nonsense `?zzz_nonsense=1` all
+ * return the SAME count as the bare list, because DRF discards a parameter it
+ * does not recognise and answers 200 with the full set. So this screen offers
+ * search and sort and no filter control at all; a Filter button here would
+ * change the URL, change nothing else, and look like it had worked.
+ *
+ * Ordering IS live (the global `OrderingFilter`), and every option in the sort
+ * menu was checked against the API to confirm it genuinely reorders rows.
+ * `ordering=bogusfield` is likewise dropped in silence, so only verified
+ * fields are offered.
  */
 
-interface BranchForm {
-  name: string;
-  code: string;
-  city: string;
-  address: string;
-  phone: string;
-  is_active: boolean;
-}
-
-const EMPTY_FORM: BranchForm = {
-  name: '',
-  code: '',
-  city: '',
-  address: '',
-  phone: '',
-  is_active: true,
-};
+/** Every value here was confirmed to reorder rows on the live endpoint. */
+const SORT_OPTIONS = [
+  { value: 'name', label: 'Name (A–Z)' },
+  { value: '-name', label: 'Name (Z–A)' },
+  { value: 'city', label: 'City' },
+  { value: '-user_count', label: 'Most staff' },
+] as const;
 
 function BranchesPage() {
   const queryClient = useQueryClient();
 
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounce(searchInput, 300);
+  const [ordering, setOrdering] = useState<string>('name');
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editing, setEditing] = useState<Branch | null>(null);
-  const [form, setForm] = useState<BranchForm>(EMPTY_FORM);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  /** Bumped on every open so the drawer remounts with a clean form. */
+  const [formSession, setFormSession] = useState(0);
   const [toggleTarget, setToggleTarget] = useState<Branch | null>(null);
 
   const branches = usePaginatedQuery<Branch>(['branches'], apiClient.branches.list, {
     search,
-    ordering: 'name',
-  });
-
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['branches'] });
-    queryClient.invalidateQueries({ queryKey: ['branch-options'] });
-  };
-
-  const saveMutation = useMutation({
-    mutationFn: (payload: BranchForm) =>
-      editing ? apiClient.branches.update(editing.id, payload) : apiClient.branches.create(payload),
-    onSuccess: () => {
-      invalidate();
-      closeForm();
-    },
-    onError: (error: unknown) => setFieldErrors(getApiFieldErrors(error) ?? {}),
+    ordering,
   });
 
   const toggleMutation = useMutation({
-    mutationFn: (branch: Branch) => apiClient.branches.update(branch.id, { is_active: !branch.is_active }),
+    mutationFn: (branch: Branch) =>
+      apiClient.branches.update(branch.id, { is_active: !branch.is_active }),
     onSuccess: () => {
-      invalidate();
+      // Deactivating a branch changes seat counting and who can reach what, so
+      // both the list and the shared branch picker must refetch.
+      queryClient.invalidateQueries({ queryKey: ['branches'] });
+      queryClient.invalidateQueries({ queryKey: ['branch-options'] });
       setToggleTarget(null);
     },
   });
 
-  const openCreate = () => {
-    setEditing(null);
-    setForm(EMPTY_FORM);
-    setFieldErrors({});
-    saveMutation.reset();
-    setIsFormOpen(true);
-  };
-
-  const openEdit = (branch: Branch) => {
+  const openForm = (branch: Branch | null) => {
     setEditing(branch);
-    setForm({
-      name: branch.name,
-      code: branch.code,
-      city: branch.city,
-      address: branch.address,
-      phone: branch.phone,
-      is_active: branch.is_active,
-    });
-    setFieldErrors({});
-    saveMutation.reset();
+    setFormSession((n) => n + 1);
     setIsFormOpen(true);
   };
 
-  const closeForm = () => {
-    setIsFormOpen(false);
-    setEditing(null);
-    setFieldErrors({});
-  };
-
+  /*
+   * Page-scoped, and labelled as such where they are shown.
+   *
+   * These used to sit in KPI cards beside the server's `count` reading "Active"
+   * and "Staff", as though all three were totals. They are not: they reduce
+   * over whatever rows this page happens to hold. There is no honest total to
+   * put in their place — the endpoint has no `is_active` filter to take a
+   * filtered `count` from and no staff aggregate — so the wording carries the
+   * scope instead of the number pretending to a reach it does not have.
+   */
   const activeOnPage = branches.rows.filter((branch) => branch.is_active).length;
-  const staffOnPage = branches.rows.reduce((sum, branch) => sum + (branch.user_count), 0);
+  const staffOnPage = branches.rows.reduce((sum, branch) => sum + branch.user_count, 0);
+
+  const isSearching = search.trim() !== '';
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-slate-900 font-heading">Branches</h1>
-          <p className="mt-1 text-sm text-slate-600 font-body">
-            Create and manage the offices your team works out of
-          </p>
+    <div className="mx-auto max-w-[1400px] px-3 pt-1 sm:px-6">
+      {/*
+        No visible title. `AppShell` already puts "Branches" in the topbar —
+        Topbar.tsx has no entry for this route, so its fallback derives the name
+        from the last path segment — and the sidebar highlights the same word,
+        so printing it a third time cost a block of vertical space to say
+        nothing new.
+
+        The heading survives as screen-reader-only because what the topbar
+        renders is a `<span>`, not a heading element: with this removed
+        outright the document would have no `h1` at all and heading navigation
+        would land nowhere.
+      */}
+      <h1 className="sr-only">Branches</h1>
+
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="Search by name, code or city…"
+              aria-label="Search branches"
+              className="h-9 border-slate-200 bg-white pl-9 text-sm focus:border-teal-500 focus:ring-teal-500"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Select value={ordering} onValueChange={setOrdering}>
+              <SelectTrigger
+                aria-label="Sort branches"
+                className="h-9 w-[9.5rem] shrink-0 border-slate-200 text-xs"
+              >
+                <ArrowUpDown className="mr-1.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value} className="text-xs">
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Button
+              onClick={() => openForm(null)}
+              size="sm"
+              className="h-9 shrink-0 bg-teal-600 text-xs text-white hover:bg-teal-700"
+            >
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              <span className="hidden sm:inline">New branch</span>
+              <span className="sm:hidden">New</span>
+            </Button>
+          </div>
         </div>
-        <Button onClick={openCreate} className="h-10 w-full bg-teal-600 hover:bg-teal-700 sm:w-auto">
-          <Plus className="mr-2 h-4 w-4" /> New Branch
-        </Button>
-      </div>
 
-      {toggleMutation.isError && <ErrorBanner error={toggleMutation.error} onDismiss={() => toggleMutation.reset()} />}
+        {toggleMutation.isError && (
+          <div className="border-b border-slate-100 p-3">
+            <ErrorBanner error={toggleMutation.error} onDismiss={() => toggleMutation.reset()} />
+          </div>
+        )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
-        <Card className="border-slate-200 p-4 sm:p-5">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Total branches</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900">{branches.count}</p>
-        </Card>
-        <Card className="border-slate-200 p-4 sm:p-5">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Active on this page</p>
-          <p className="mt-1 text-2xl font-bold text-green-600">{activeOnPage}</p>
-        </Card>
-        <Card className="border-slate-200 p-4 sm:p-5">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Staff on this page</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900">{staffOnPage}</p>
-        </Card>
-      </div>
+        {/*
+          The only total here is the server's own `count`. The other two figures
+          say "on this page" because that is all they are — see the note above
+          `activeOnPage`.
+        */}
+        {branches.rows.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 bg-slate-50/70 px-3 py-2 text-xs text-slate-600">
+            <span>
+              <span className="font-semibold text-slate-900">{branches.count}</span>{' '}
+              {branches.count === 1 ? 'branch' : 'branches'}
+              {isSearching && ' matching'}
+            </span>
+            <span aria-hidden className="text-slate-300">
+              |
+            </span>
+            <span>
+              <span className="font-semibold text-slate-900">{activeOnPage}</span> of{' '}
+              {branches.rows.length} active on this page
+            </span>
+            <span aria-hidden className="text-slate-300">
+              |
+            </span>
+            <span>
+              <span className="font-semibold text-slate-900">{staffOnPage}</span> staff on this page
+            </span>
+          </div>
+        )}
 
-      <div className="relative max-w-md">
-        <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <Input
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Search by name, code or city…"
-          aria-label="Search branches"
-          className="h-10 pl-9"
-        />
-      </div>
-
-      {branches.isError ? (
-        <ErrorState error={branches.error} onRetry={branches.refetch} />
-      ) : branches.isLoading ? (
-        <LoadingState rows={4} label="Loading branches" />
-      ) : branches.rows.length === 0 ? (
-        <EmptyState
-          icon={Building2}
-          title={search ? 'No branches match that search' : 'No branches yet'}
-          description={
-            search
-              ? 'Try a different name, code or city.'
-              : 'Add your first branch so staff and records can be assigned to a location.'
-          }
-          action={
-            search ? (
-              <Button variant="outline" onClick={() => setSearchInput('')}>
-                Clear search
-              </Button>
-            ) : (
-              <Button onClick={openCreate} className="bg-teal-600 hover:bg-teal-700">
-                <Plus className="mr-2 h-4 w-4" /> New Branch
-              </Button>
-            )
-          }
-        />
-      ) : (
-        <Card className="overflow-hidden border-slate-200">
+        {branches.isError ? (
+          <div className="p-4">
+            <ErrorState error={branches.error} onRetry={branches.refetch} />
+          </div>
+        ) : branches.isLoading ? (
+          <div className="p-4">
+            <LoadingState rows={4} label="Loading branches" />
+          </div>
+        ) : branches.rows.length === 0 ? (
+          <div className="p-4">
+            <EmptyState
+              icon={Building2}
+              title={isSearching ? 'No branches match that search' : 'No branches yet'}
+              description={
+                isSearching
+                  ? 'Try a different name, code or city.'
+                  : 'Add your first branch so staff and records can be assigned to a location.'
+              }
+              action={
+                isSearching ? (
+                  <Button variant="outline" onClick={() => setSearchInput('')}>
+                    Clear search
+                  </Button>
+                ) : (
+                  <Button onClick={() => openForm(null)} className="bg-teal-600 hover:bg-teal-700">
+                    <Plus className="mr-2 h-4 w-4" /> New branch
+                  </Button>
+                )
+              }
+            />
+          </div>
+        ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[560px] text-sm">
               <thead className="border-b border-slate-200 bg-slate-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700">Branch</th>
-                  <th className="hidden px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700 md:table-cell">
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-700">
+                    Branch
+                  </th>
+                  <th className="hidden px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-700 md:table-cell">
                     Managers
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700">Staff</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700">Status</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-slate-700">Actions</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-700">
+                    Staff
+                  </th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-700">
+                    Status
+                  </th>
+                  <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-slate-700">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
@@ -203,10 +258,10 @@ function BranchesPage() {
                   const managers = branch.manager_names;
                   return (
                     <tr key={branch.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-4">
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
-                            <Building2 size={16} />
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-start gap-2.5">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
+                            <Building2 size={15} />
                           </div>
                           <div className="min-w-0">
                             <p className="truncate font-semibold text-slate-900">{branch.name}</p>
@@ -219,13 +274,13 @@ function BranchesPage() {
                                 </>
                               )}
                             </p>
-                            <p className="mt-1 truncate text-xs text-slate-500 md:hidden">
+                            <p className="mt-0.5 truncate text-xs text-slate-500 md:hidden">
                               {managers.length > 0 ? managers.join(', ') : 'No manager assigned'}
                             </p>
                           </div>
                         </div>
                       </td>
-                      <td className="hidden px-4 py-4 md:table-cell">
+                      <td className="hidden px-3 py-2.5 md:table-cell">
                         {managers.length > 0 ? (
                           <div className="flex flex-wrap gap-1">
                             {managers.map((name) => (
@@ -241,12 +296,12 @@ function BranchesPage() {
                           <span className="text-xs text-slate-400">Not assigned</span>
                         )}
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="px-3 py-2.5">
                         <span className="inline-flex items-center gap-1.5 text-slate-700">
                           <Users size={14} className="text-slate-400" /> {branch.user_count}
                         </span>
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="px-3 py-2.5">
                         <div className="flex flex-wrap gap-1">
                           <Badge
                             className={
@@ -264,13 +319,13 @@ function BranchesPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="px-3 py-2.5">
                         <div className="flex justify-end gap-1">
                           <Button
                             variant="ghost"
                             size="sm"
                             className="h-8 w-8 p-0 hover:bg-teal-50 hover:text-teal-600"
-                            onClick={() => openEdit(branch)}
+                            onClick={() => openForm(branch)}
                             aria-label={`Edit ${branch.name}`}
                           >
                             <Pencil size={15} />
@@ -281,7 +336,9 @@ function BranchesPage() {
                             className="h-8 w-8 p-0 hover:bg-amber-50 hover:text-amber-600 disabled:opacity-40"
                             onClick={() => setToggleTarget(branch)}
                             disabled={branch.is_default}
-                            title={branch.is_default ? 'The default branch cannot be deactivated' : undefined}
+                            title={
+                              branch.is_default ? 'The default branch cannot be deactivated' : undefined
+                            }
                             aria-label={`${branch.is_active ? 'Deactivate' : 'Activate'} ${branch.name}`}
                           >
                             <Power size={15} />
@@ -294,141 +351,24 @@ function BranchesPage() {
               </tbody>
             </table>
           </div>
+        )}
 
-          <PaginationBar
-            page={branches.page}
-            pages={branches.pages}
-            count={branches.count}
-            pageSize={branches.pageSize}
-            onPageChange={branches.setPage}
-            isLoading={branches.isFetching}
-          />
-        </Card>
-      )}
+        <PaginationBar
+          page={branches.page}
+          pages={branches.pages}
+          count={branches.count}
+          pageSize={branches.pageSize}
+          onPageChange={branches.setPage}
+          isLoading={branches.isFetching}
+        />
+      </section>
 
-      <Modal
+      <BranchFormDrawer
+        key={formSession}
         open={isFormOpen}
-        onClose={closeForm}
-        title={editing ? `Edit ${editing.name}` : 'New branch'}
-        description={
-          editing
-            ? 'Update this office’s details.'
-            : 'Branch managers and employees are assigned from the Users page once the branch exists.'
-        }
-        footer={
-          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-            <Button type="button" variant="outline" className="h-11 sm:w-32" onClick={closeForm}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              form="branch-form"
-              className="h-11 bg-teal-600 hover:bg-teal-700 sm:w-40"
-              disabled={saveMutation.isPending}
-            >
-              {saveMutation.isPending ? (
-                <>
-                  <InlineSpinner className="mr-2" /> Saving…
-                </>
-              ) : editing ? (
-                'Save changes'
-              ) : (
-                'Create branch'
-              )}
-            </Button>
-          </div>
-        }
-      >
-        <form
-          id="branch-form"
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setFieldErrors({});
-            saveMutation.mutate(form);
-          }}
-        >
-          {saveMutation.isError && <ErrorBanner error={saveMutation.error} />}
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="branch-name">Branch name *</Label>
-              <Input
-                id="branch-name"
-                required
-                className="h-11"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Kochi Main"
-              />
-              {fieldErrors.name && <p className="text-xs text-red-600">{fieldErrors.name}</p>}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="branch-code">Code *</Label>
-              <Input
-                id="branch-code"
-                required
-                className="h-11 uppercase"
-                value={form.code}
-                onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
-                placeholder="KCH"
-              />
-              {fieldErrors.code && <p className="text-xs text-red-600">{fieldErrors.code}</p>}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="branch-city">City</Label>
-              <Input
-                id="branch-city"
-                className="h-11"
-                value={form.city}
-                onChange={(e) => setForm({ ...form, city: e.target.value })}
-              />
-              {fieldErrors.city && <p className="text-xs text-red-600">{fieldErrors.city}</p>}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="branch-phone">Phone</Label>
-              <Input
-                id="branch-phone"
-                type="tel"
-                className="h-11"
-                value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              />
-              {fieldErrors.phone && <p className="text-xs text-red-600">{fieldErrors.phone}</p>}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="branch-address">Address</Label>
-            <textarea
-              id="branch-address"
-              rows={3}
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              value={form.address}
-              onChange={(e) => setForm({ ...form, address: e.target.value })}
-            />
-            {fieldErrors.address && <p className="text-xs text-red-600">{fieldErrors.address}</p>}
-          </div>
-
-          <label className="flex items-start gap-3 rounded-lg border border-slate-200 p-3">
-            <input
-              type="checkbox"
-              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-              checked={form.is_active}
-              onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
-            />
-            <span className="text-sm">
-              <span className="font-medium text-slate-900">Active</span>
-              <span className="mt-0.5 block text-xs text-slate-500">
-                Inactive branches stay in reports but cannot receive new records or staff.
-              </span>
-            </span>
-          </label>
-        </form>
-      </Modal>
+        branch={editing}
+        onClose={() => setIsFormOpen(false)}
+      />
 
       <ConfirmDialog
         open={toggleTarget !== null}

@@ -10,7 +10,7 @@ import { can as canByDefault, type Capability } from './roles';
  * The capabilities the signed-in user's ROLE actually holds, per the server.
  *
  * `CAN` in ./roles.ts is a compiled-in copy of the built-in defaults. It cannot
- * know that an admin has granted head managers the lead-source screen, so
+ * know that an admin has granted head managers the commissions screen, so
  * without this the server would honour a permission the UI still hid — and the
  * permissions page would be a screen that changes nothing visible, which is the
  * failure mode worth avoiding most.

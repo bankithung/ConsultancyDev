@@ -532,8 +532,11 @@ export function EnrollmentWizard({ onSubmit, isLoading, error }: EnrollmentWizar
 
   return (
     <>
-      <Card className="overflow-hidden border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 bg-slate-50 px-4 py-4 sm:px-6">
+      {/* No `overflow-hidden` here: it clipped the student SearchableSelect
+          dropdown to the card box. The header and footer below carry their
+          own corner radius instead, which is all the clipping was doing. */}
+      <Card className="border border-slate-200 bg-white shadow-sm">
+        <div className="rounded-t-lg border-b border-slate-200 bg-slate-50 px-4 py-4 sm:px-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
@@ -1315,7 +1318,7 @@ export function EnrollmentWizard({ onSubmit, isLoading, error }: EnrollmentWizar
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-4 sm:px-6">
+          <div className="flex items-center justify-between gap-3 rounded-b-lg border-t border-slate-200 bg-slate-50 px-4 py-4 sm:px-6">
             <Button
               type="button"
               variant="outline"

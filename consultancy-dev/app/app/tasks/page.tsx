@@ -8,13 +8,18 @@ import {
     Plus, Clock, Bell, Phone, Mail, MessageSquare,
     Flag, Layout, FileText, Circle, Loader2, Check,
     ChevronDown, ChevronUp, Search, MoreHorizontal, Trash2, User as UserIcon,
+    SlidersHorizontal, X,
 } from 'lucide-react';
 
 import { api } from '@/lib/api';
-import { apiClient, fetchPage } from '@/lib/apiClient';
-import type { FollowUp, Paginated, ScopedFields } from '@/lib/types';
+import { apiClient, fetchCount, fetchPage } from '@/lib/apiClient';
+import type { Branch, FollowUp, Paginated, ScopedFields, User as StaffUser } from '@/lib/types';
 import { toArray } from '@/components/common/pagination';
 import { Drawer } from '@/components/common/Drawer';
+import {
+    FilterDrawer, selectionCount,
+    type FilterGroup, type FilterSelection,
+} from '@/components/common/FilterDrawer';
 import { ErrorState, LoadingState } from '@/components/common/states';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +30,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useAuth } from '@/hooks/useAuth';
 import { useCurrentRole } from '@/components/rbac/useCurrentRole';
+import { ROLES } from '@/components/rbac/roles';
 import { useDebounce } from '@/hooks/useDebounce';
 import { toast } from '@/store/toastStore';
 
@@ -99,10 +105,27 @@ const COLUMN_COLORS: Record<ColumnType, { bg: string; border: string; text: stri
 
 /**
  * A kanban board has to show every card, not page 1 of 25, so it asks for the
- * server's maximum page. Past that the board reports the shortfall instead of
- * pretending the tail does not exist.
+ * server's maximum page.
+ *
+ * VERIFIED: this is a CAP, not "everything". `StandardPagination` (backend
+ * core/pagination.py) sets `max_page_size = 200`, so a larger request is
+ * silently trimmed back to 200. Every figure this page derives by counting the
+ * loaded rows — the column badges, overdue, due today — is therefore only true
+ * while `count <= 200`. Past that they are suppressed rather than shown wrong;
+ * see `boardComplete`.
  */
 const BOARD_PAGE_SIZE = 200;
+
+/**
+ * Roles that see other people's records, and so have a branch worth filtering
+ * by. Mirrors the admissions directory.
+ */
+const SUPERVISOR_ROLES = [
+    ROLES.DEV_ADMIN,
+    ROLES.COMPANY_ADMIN,
+    ROLES.HEAD_MANAGER,
+    ROLES.BRANCH_MANAGER,
+] as const;
 
 const priorityBorder = (value: string) => PRIORITY_BORDER[value] ?? PRIORITY_BORDER.Low;
 const priorityDot = (value: string) => PRIORITY_DOT[value] ?? PRIORITY_DOT.Low;
@@ -127,6 +150,23 @@ function isOverdue(value: string | null | undefined): boolean {
     if (!value) return false;
     const date = new Date(value);
     return !Number.isNaN(date.getTime()) && date < new Date();
+}
+
+function isDueToday(value: string | null | undefined): boolean {
+    if (!value) return false;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return false;
+    const today = new Date();
+    return (
+        date.getFullYear() === today.getFullYear() &&
+        date.getMonth() === today.getMonth() &&
+        date.getDate() === today.getDate()
+    );
+}
+
+function staffName(user: StaffUser): string {
+    const full = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
+    return full || user.username;
 }
 
 /** `due_date` is a DateTimeField; the edit form's date input wants YYYY-MM-DD. */
@@ -274,12 +314,18 @@ function TaskCard({ task, onEdit, onMove, onDelete, canDelete, onDragStart, onDr
 function BoardColumn({
     column,
     tasks,
+    showCount,
     onAddTask,
     onDropTask,
     children,
 }: {
     column: ColumnType;
     tasks: TaskRow[];
+    /**
+     * False once the board has been trimmed by the page cap — the badge would
+     * then be counting the rows that happened to arrive, not the column.
+     */
+    showCount: boolean;
     onAddTask: () => void;
     onDropTask: (column: ColumnType) => void;
     children: React.ReactNode;
@@ -305,15 +351,17 @@ function BoardColumn({
                 onDropTask(column);
             }}
             className={`
-                flex flex-col rounded-xl border transition-all duration-200 min-h-[220px] md:min-h-[400px]
+                flex flex-col rounded-lg border transition-all duration-200 min-h-[140px] md:min-h-[360px]
                 ${isOver ? 'border-teal-400 bg-teal-50/50 ring-2 ring-teal-200' : `${colors.border} ${colors.bg}`}
             `}
         >
-            <div className={`flex items-center justify-between px-3 py-2.5 border-b ${colors.border}`}>
+            <div className={`flex items-center justify-between px-3 py-2 border-b ${colors.border}`}>
                 <div className="flex items-center gap-2">
                     <Icon size={14} className={`${colors.text} ${column === 'In Progress' ? 'animate-spin' : ''}`} />
                     <h3 className={`font-semibold text-sm ${colors.text}`}>{column}</h3>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${colors.badge}`}>{tasks.length}</span>
+                    {showCount && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${colors.badge}`}>{tasks.length}</span>
+                    )}
                 </div>
                 <button
                     onClick={onAddTask}
@@ -325,7 +373,14 @@ function BoardColumn({
                 </button>
             </div>
 
-            <div className="flex-1 space-y-2 p-2 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+            {/*
+              The inner scroller only exists from `md` up, where the three
+              columns sit side by side and each needs its own viewport. On a
+              phone the columns are stacked, and a short scrolling box inside a
+              scrolling page is a trap — there the list grows and the page
+              scrolls instead.
+            */}
+            <div className="flex-1 space-y-2 p-2 md:overflow-y-auto md:max-h-[calc(100vh-300px)]">
                 {children}
             </div>
         </div>
@@ -361,14 +416,18 @@ function isSameDraft(a: Draft, b: Draft): boolean {
 
 export default function TasksPage() {
     const { user } = useAuth();
-    const { can } = useCurrentRole();
+    const { can, is } = useCurrentRole();
     const router = useRouter();
     const queryClient = useQueryClient();
+
+    const canSeeOthers = is(...SUPERVISOR_ROLES);
 
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [searchInput, setSearchInput] = useState('');
     const search = useDebounce(searchInput, 300);
-    const [priorityFilter, setPriorityFilter] = useState<string>('all');
+    const [isFilterOpen, setIsFilterOpen] = useState(false);
+    const [activeParam, setActiveParam] = useState<string>('priority');
+    const [selection, setSelectionState] = useState<FilterSelection>({});
     const [followUpsExpanded, setFollowUpsExpanded] = useState(true);
 
     const [draft, setDraft] = useState(EMPTY_DRAFT);
@@ -384,19 +443,53 @@ export default function TasksPage() {
     const [deleteTarget, setDeleteTarget] = useState<TaskRow | null>(null);
     const [draggedTask, setDraggedTask] = useState<TaskRow | null>(null);
 
+    /**
+     * Every key here is a parameter `TaskViewSet` actually declares
+     * (`filterset_fields = ('status', 'assigned_to', 'priority', 'branch')`).
+     * DRF drops query parameters it does not recognise and answers 200 with the
+     * UNFILTERED list, so a control wired to anything else would look like it
+     * worked while showing the wrong rows.
+     */
     const taskFilters = useMemo(() => {
         const filters: Record<string, string> = {};
-        if (priorityFilter !== 'all') filters.priority = priorityFilter;
+        for (const [param, values] of Object.entries(selection)) {
+            if (values.length > 0) filters[param] = values[0];
+        }
         return filters;
-    }, [priorityFilter]);
+    }, [selection]);
 
     /**
-     * `TaskViewSet` declares `search_fields = (title, description)` and
-     * `filterset_fields = (status, assigned_to, priority, branch)`, so both the
-     * search box and the priority filter run in SQL rather than over one page.
+     * Task filters are django-filter's AUTO-GENERATED ones — plain exact
+     * lookups, not the `MultiValueFilter` subclasses in core/filters.py that
+     * back the enquiry and payment drawers. Repeated keys
+     * (`?priority=High&priority=Low`) reach a form field that reads
+     * `QueryDict.get()`, so only the LAST value is ever applied.
+     *
+     * The drawer is multi-select by construction, so each group is clamped to
+     * one value here: the newest pick replaces the previous one. The checkbox
+     * state then always matches what the server was asked for, which a silent
+     * second selection would not.
+     */
+    const setSelection = (next: FilterSelection) => {
+        const clamped: FilterSelection = {};
+        for (const [param, values] of Object.entries(next)) {
+            if (values.length === 0) continue;
+            const previous = selection[param] ?? [];
+            const added = values.filter((value) => !previous.includes(value));
+            clamped[param] = [added.length > 0 ? added[added.length - 1] : values[values.length - 1]];
+        }
+        setSelectionState(clamped);
+    };
+
+    /** The exact key the board's rows live under, shared with the optimistic move. */
+    const boardKey = useMemo(() => ['tasks', 'board', { search, filters: taskFilters }] as const, [search, taskFilters]);
+
+    /**
+     * `TaskViewSet` declares `search_fields = ('title', 'description')`, so the
+     * search box runs in SQL rather than over one page.
      */
     const tasksQuery = useQuery({
-        queryKey: ['tasks', { search, priority: priorityFilter }],
+        queryKey: boardKey,
         queryFn: () =>
             fetchPage<TaskRow>('tasks/', {
                 page_size: BOARD_PAGE_SIZE,
@@ -409,12 +502,39 @@ export default function TasksPage() {
     const tasks = useMemo(() => toArray(tasksQuery.data), [tasksQuery.data]);
     const totalCount = tasksQuery.data?.count ?? 0;
     const truncated = totalCount > tasks.length;
+    /** True only when every matching task is in memory. Gate for counted figures. */
+    const boardComplete = !truncated;
 
     const usersQuery = useQuery({
         queryKey: ['users', 'assignable'],
         queryFn: () => apiClient.users.list({ page_size: 200, ordering: 'username' }),
     });
     const users = toArray(usersQuery.data);
+
+    const branchesQuery = useQuery({
+        queryKey: ['branches', 'filter-options'],
+        queryFn: () => apiClient.branches.list({ page_size: 200, ordering: 'name' }),
+        enabled: canSeeOthers,
+        staleTime: 5 * 60 * 1000,
+    });
+
+    /**
+     * "Assigned to me" comes from the SERVER's own count for
+     * `?assigned_to=<me>` rather than from the rows on screen, so it stays true
+     * past the 200-row cap. It is hidden while an explicit "Assigned to" filter
+     * is set, where the board is already scoped to named people and a figure
+     * ignoring that filter would read as a contradiction.
+     */
+    const assigneeFilter = selection.assigned_to?.[0];
+    const myTaskCountQuery = useQuery({
+        queryKey: ['tasks', 'mine-count', user?.id, { search, filters: taskFilters }],
+        queryFn: () =>
+            fetchCount('tasks/', {
+                search: search || undefined,
+                filters: { ...taskFilters, assigned_to: String(user?.id ?? 0) },
+            }),
+        enabled: Boolean(user?.id) && !assigneeFilter,
+    });
 
     /**
      * Follow-ups assigned to the signed-in user and still pending. Filtered in
@@ -442,6 +562,97 @@ export default function TasksPage() {
         }
         return grouped;
     }, [tasks]);
+
+    /**
+     * The two figures the three columns cannot show. Both are counted over the
+     * loaded rows because `due_date` has NO server-side filter — `TaskViewSet`
+     * lists it under `ordering_fields` only — so there is no endpoint to ask.
+     * That makes them honest exactly while `boardComplete`, and they are not
+     * rendered otherwise.
+     */
+    const dateCounts = useMemo(() => {
+        let overdue = 0;
+        let dueToday = 0;
+        for (const task of tasks) {
+            if (task.status === 'Done') continue;
+            if (isOverdue(task.due_date)) overdue += 1;
+            else if (isDueToday(task.due_date)) dueToday += 1;
+        }
+        return { overdue, dueToday };
+    }, [tasks]);
+
+    /**
+     * Only groups the server implements. Deliberately absent:
+     *
+     * - `status`, which IS a server filter but is also the board's three
+     *   columns — filtering it would blank two of them.
+     * - anything date-shaped (overdue, due this week): there is no due_date
+     *   filter on the viewset, and DRF would answer 200 with every row.
+     */
+    const groups = useMemo<FilterGroup[]>(() => {
+        const base: FilterGroup[] = [
+            {
+                param: 'priority',
+                label: 'Priority',
+                options: PRIORITIES.map((priority) => ({ value: priority, label: priority })),
+                hint: 'One at a time — the server matches a single priority.',
+            },
+            {
+                param: 'assigned_to',
+                label: 'Assigned to',
+                searchable: true,
+                options: users.map((candidate) => ({
+                    value: String(candidate.id),
+                    label: staffName(candidate),
+                })),
+                hint: 'One at a time — the server matches a single assignee.',
+            },
+        ];
+
+        if (!canSeeOthers) return base;
+
+        return [
+            ...base,
+            {
+                param: 'branch',
+                label: 'Branch',
+                searchable: true,
+                options: toArray<Branch>(branchesQuery.data).map((branch) => ({
+                    value: String(branch.id),
+                    label: branch.name,
+                })),
+                hint: 'One at a time — the server matches a single branch.',
+            },
+        ];
+    }, [users, canSeeOthers, branchesQuery.data]);
+
+    const filterCount = selectionCount(selection);
+
+    const openFilters = (param?: string) => {
+        setActiveParam(param ?? groups[0]?.param ?? 'priority');
+        setIsFilterOpen(true);
+    };
+
+    const chips = useMemo(
+        () =>
+            groups
+                .filter((group) => (selection[group.param] ?? []).length > 0)
+                .map((group) => {
+                    const value = (selection[group.param] ?? [])[0];
+                    return {
+                        param: group.param,
+                        label: group.label,
+                        detail: group.options.find((option) => option.value === value)?.label ?? value,
+                    };
+                }),
+        [groups, selection],
+    );
+
+    const removeChip = (param: string) => {
+        const next = { ...selection };
+        delete next[param];
+        setSelectionState(next);
+    };
 
     const invalidateBoard = () => {
         void queryClient.invalidateQueries({ queryKey: ['tasks'] });
@@ -484,7 +695,7 @@ export default function TasksPage() {
             return res.data;
         },
         onMutate: async ({ id, status }) => {
-            const key = ['tasks', { search, priority: priorityFilter }];
+            const key = boardKey;
             await queryClient.cancelQueries({ queryKey: key });
             const previous = queryClient.getQueryData<Paginated<TaskRow>>(key);
 
@@ -616,7 +827,7 @@ export default function TasksPage() {
         return false;
     };
 
-    const hasFilters = searchInput !== '' || priorityFilter !== 'all';
+    const hasFilters = searchInput !== '' || filterCount > 0;
 
     const createFooter = confirmDiscardCreate ? (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -709,80 +920,183 @@ export default function TasksPage() {
 
     return (
         <div className="space-y-3">
-            {/* Toolbar */}
-            <div className="flex flex-wrap items-center gap-2">
-                <div className="relative flex-1 min-w-[180px]">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <Input
-                        placeholder="Search tasks by title or description..."
-                        value={searchInput}
-                        onChange={(e) => setSearchInput(e.target.value)}
-                        className="pl-9 h-9 w-full text-sm bg-white border-slate-200 focus:border-teal-500 focus:ring-teal-500/20"
-                    />
+            {/*
+              One panel: toolbar, the summary line, the applied-filter chips and
+              the board itself. The same object the admissions and engagements
+              directories are.
+            */}
+            <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                <div className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
+                    <div className="relative min-w-0 flex-1">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input
+                            value={searchInput}
+                            onChange={(event) => setSearchInput(event.target.value)}
+                            placeholder="Search tasks by title or description…"
+                            aria-label="Search tasks"
+                            className="h-9 border-slate-200 bg-white pl-9 text-sm focus:border-teal-500 focus:ring-teal-500"
+                        />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openFilters()}
+                            aria-haspopup="dialog"
+                            aria-expanded={isFilterOpen}
+                            className={
+                                filterCount > 0
+                                    ? 'h-9 shrink-0 border-teal-200 bg-teal-50 text-xs text-teal-700 hover:bg-teal-100'
+                                    : 'h-9 shrink-0 border-slate-200 text-xs'
+                            }
+                        >
+                            <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />
+                            Filter
+                            {filterCount > 0 && (
+                                <span className="ml-1.5 rounded-full bg-teal-600 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                                    {filterCount}
+                                </span>
+                            )}
+                        </Button>
+
+                        <Button
+                            onClick={() => openCreateFor('Todo')}
+                            size="sm"
+                            className="h-9 shrink-0 bg-teal-600 text-xs hover:bg-teal-700"
+                        >
+                            <Plus className="mr-1 h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">New Task</span>
+                            <span className="sm:hidden">New</span>
+                        </Button>
+                    </div>
                 </div>
 
-                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                    <SelectTrigger className="h-9 w-32 text-xs border-slate-200 bg-white shrink-0">
-                        <SelectValue placeholder="All Priority" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">All Priority</SelectItem>
-                        {PRIORITIES.map((priority) => (
-                            <SelectItem key={priority} value={priority}>
-                                <span className="flex items-center gap-1.5">
-                                    <span className={`w-2 h-2 rounded-full ${priorityDot(priority)}`} /> {priority}
-                                </span>
-                            </SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
+                {/*
+                  The summary line, and only what the three columns cannot say
+                  themselves. A Todo/In Progress/Done strip here would be the
+                  same three numbers twice on one screen, free to disagree.
 
-                {hasFilters && (
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-9 text-xs border-slate-200 text-slate-600 hover:bg-slate-100 shrink-0"
-                        onClick={() => { setSearchInput(''); setPriorityFilter('all'); }}
-                    >
-                        Clear
-                    </Button>
+                  Read-outs, not controls: `due_date` has no server filter, so a
+                  clickable "Overdue" could only ever filter the rows already
+                  fetched. Nothing here is styled as a button.
+                */}
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 pb-3 text-xs text-slate-500">
+                    <span>
+                        <span className="font-semibold text-slate-900">{totalCount}</span>{' '}
+                        {totalCount === 1 ? 'task' : 'tasks'}
+                        {hasFilters && ' matching'}
+                    </span>
+
+                    {boardComplete && (
+                        <>
+                            <span aria-hidden className="text-slate-300">·</span>
+                            <span className={dateCounts.overdue > 0 ? 'text-red-600' : undefined}>
+                                <span className="font-semibold">{dateCounts.overdue}</span> overdue
+                            </span>
+                            <span aria-hidden className="text-slate-300">·</span>
+                            <span>
+                                <span className="font-semibold text-slate-700">{dateCounts.dueToday}</span> due today
+                            </span>
+                        </>
+                    )}
+
+                    {!assigneeFilter && myTaskCountQuery.data !== undefined && (
+                        <>
+                            <span aria-hidden className="text-slate-300">·</span>
+                            <span>
+                                <span className="font-semibold text-slate-700">{myTaskCountQuery.data}</span> assigned to me
+                            </span>
+                        </>
+                    )}
+                </div>
+
+                {/* Applied filters. Clicking a chip reopens the drawer at that group. */}
+                {chips.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 bg-slate-50/70 px-3 py-2">
+                        {chips.map((chip) => (
+                            <span
+                                key={chip.param}
+                                className="inline-flex items-center overflow-hidden rounded-full border border-teal-200 bg-white text-xs text-teal-800"
+                            >
+                                <button
+                                    type="button"
+                                    onClick={() => openFilters(chip.param)}
+                                    className="py-1 pl-2.5 pr-1.5 transition-colors hover:bg-teal-50"
+                                >
+                                    <span className="text-slate-500">{chip.label}:</span>{' '}
+                                    <span className="font-medium">{chip.detail}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => removeChip(chip.param)}
+                                    aria-label={`Remove ${chip.label} filter`}
+                                    className="py-1 pl-0.5 pr-2 text-teal-500 transition-colors hover:text-teal-800"
+                                >
+                                    <X size={12} />
+                                </button>
+                            </span>
+                        ))}
+                        <button
+                            type="button"
+                            onClick={() => setSelectionState({})}
+                            className="ml-1 text-xs text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline"
+                        >
+                            Clear filters
+                        </button>
+                    </div>
                 )}
 
-                <Button
-                    className="h-9 text-xs bg-teal-600 hover:bg-teal-700 shadow-sm shrink-0"
-                    onClick={() => openCreateFor('Todo')}
-                >
-                    <Plus className="mr-1.5 h-3.5 w-3.5" /> New Task
-                </Button>
-            </div>
+                {truncated && (
+                    <p className="border-t border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                        Showing the {tasks.length} soonest-due tasks of {totalCount} — the server caps a page at{' '}
+                        {BOARD_PAGE_SIZE}. Column totals and the overdue figures are hidden rather than counted over a
+                        part of the board; narrow the search or filters to bring them back.
+                    </p>
+                )}
 
-            {/* Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                <div className="bg-white border border-slate-200 rounded p-2 flex items-center justify-between shadow-sm">
-                    <span className="text-xs font-medium text-slate-500 uppercase">Total</span>
-                    <span className="text-lg font-bold text-slate-900">{totalCount}</span>
+                {/* Board */}
+                <div className="grid grid-cols-1 gap-3 border-t border-slate-100 bg-slate-50/40 p-3 md:grid-cols-3">
+                    {COLUMNS.map((column) => {
+                        const columnTasks = tasksByColumn[column];
+                        return (
+                            <BoardColumn
+                                key={column}
+                                column={column}
+                                tasks={columnTasks}
+                                showCount={boardComplete}
+                                onAddTask={() => openCreateFor(column)}
+                                onDropTask={handleDrop}
+                            >
+                                {columnTasks.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-24 text-slate-400">
+                                        <Layout size={20} className="mb-1 opacity-50" />
+                                        <span className="text-xs">{hasFilters ? 'No matching tasks' : 'No tasks'}</span>
+                                    </div>
+                                ) : (
+                                    columnTasks.map((task) => (
+                                        <TaskCard
+                                            key={task.id}
+                                            task={task}
+                                            isDragging={draggedTask?.id === task.id}
+                                            canDelete={can('deleteRecords')}
+                                            onDragStart={setDraggedTask}
+                                            onDragEnd={() => setDraggedTask(null)}
+                                            onMove={handleMove}
+                                            onDelete={setDeleteTarget}
+                                            onEdit={openEditFor}
+                                        />
+                                    ))
+                                )}
+                            </BoardColumn>
+                        );
+                    })}
                 </div>
-                <div className="bg-emerald-50 border border-emerald-100 rounded p-2 flex items-center justify-between shadow-sm">
-                    <span className="text-xs font-medium text-emerald-600 uppercase">Done</span>
-                    <span className="text-lg font-bold text-emerald-700">{tasksByColumn['Done'].length}</span>
-                </div>
-                <div className="bg-blue-50 border border-blue-100 rounded p-2 flex items-center justify-between shadow-sm">
-                    <span className="text-xs font-medium text-blue-600 uppercase">In Progress</span>
-                    <span className="text-lg font-bold text-blue-700">{tasksByColumn['In Progress'].length}</span>
-                </div>
-                <div className="bg-slate-50 border border-slate-200 rounded p-2 flex items-center justify-between shadow-sm">
-                    <span className="text-xs font-medium text-slate-600 uppercase">Todo</span>
-                    <span className="text-lg font-bold text-slate-700">{tasksByColumn['Todo'].length}</span>
-                </div>
-            </div>
+            </section>
 
-            {truncated && (
-                <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-                    Showing the {tasks.length} soonest-due tasks of {totalCount}. Narrow the search or priority filter to see the rest.
-                </p>
-            )}
-
-            {/* My pending follow-ups */}
+            {/* My pending follow-ups — a separate concern from the board, so it
+                sits outside the panel rather than competing inside it. */}
             {myFollowUps.length > 0 && (
                 <div className="bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200 rounded-lg overflow-hidden">
                     <button
@@ -836,42 +1150,16 @@ export default function TasksPage() {
                 </div>
             )}
 
-            {/* Board */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {COLUMNS.map((column) => {
-                    const columnTasks = tasksByColumn[column];
-                    return (
-                        <BoardColumn
-                            key={column}
-                            column={column}
-                            tasks={columnTasks}
-                            onAddTask={() => openCreateFor(column)}
-                            onDropTask={handleDrop}
-                        >
-                            {columnTasks.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-24 text-slate-400">
-                                    <Layout size={20} className="mb-1 opacity-50" />
-                                    <span className="text-xs">{hasFilters ? 'No matching tasks' : 'No tasks'}</span>
-                                </div>
-                            ) : (
-                                columnTasks.map((task) => (
-                                    <TaskCard
-                                        key={task.id}
-                                        task={task}
-                                        isDragging={draggedTask?.id === task.id}
-                                        canDelete={can('deleteRecords')}
-                                        onDragStart={setDraggedTask}
-                                        onDragEnd={() => setDraggedTask(null)}
-                                        onMove={handleMove}
-                                        onDelete={setDeleteTarget}
-                                        onEdit={openEditFor}
-                                    />
-                                ))
-                            )}
-                        </BoardColumn>
-                    );
-                })}
-            </div>
+            <FilterDrawer
+                open={isFilterOpen}
+                onOpenChange={setIsFilterOpen}
+                groups={groups}
+                selection={selection}
+                onChange={setSelection}
+                activeParam={activeParam}
+                onActiveParamChange={setActiveParam}
+                noun="task"
+            />
 
             {/* Create task */}
             <Drawer

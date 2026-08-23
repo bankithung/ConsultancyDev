@@ -238,6 +238,12 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
     defaultValues: initialData ? {
       ...initialData,
       date: initialData.date ? new Date(initialData.date).toISOString().split('T')[0] : '',
+      // The API returns this as `dateOfBirth`, but the input is registered as
+      // `dob`, so the spread above never lands on it. Every other field in the
+      // schema matches mapEnquiry's output by name -- this is the one rename.
+      // Without this line a saved date of birth silently vanishes each time
+      // the enquiry is reopened, and it looks like the save never worked.
+      dob: initialData.dateOfBirth ?? '',
     } : {
       date: new Date().toISOString().split('T')[0],
       gapYear: false,
