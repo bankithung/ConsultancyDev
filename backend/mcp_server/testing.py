@@ -43,7 +43,9 @@ class DjangoTestTransport:
         else:
             response = call(url, **extra)
         content = b''.join(response.streaming_content) if getattr(response, 'streaming', False) else response.content
-        return Response(response.status_code, {k: v for k, v in response.items()}, content)
+        # Lowercase to match HttpxTransport: Response.headers has one casing,
+        # so a header lookup means the same thing behind either transport.
+        return Response(response.status_code, {k.lower(): v for k, v in response.items()}, content)
 
 
 def _q(value: str) -> str:

@@ -22,9 +22,24 @@ logger = logging.getLogger('mcp_server.client')
 
 API_KEY_PREFIX = 'cdk_'
 
+# Pause before the single GET replay on a network failure. Short on purpose:
+# it absorbs a connection reset or a restarting dev server without making a
+# genuinely unreachable backend feel hung.
+NETWORK_RETRY_SECONDS = 0.5
+
 
 @dataclass
 class Response:
+    """
+    One HTTP answer, transport-independent.
+
+    `headers` IS ALWAYS LOWERCASE-KEYED. HTTP header names are case-insensitive
+    and the two transports disagreed on casing — httpx lowercases, Django
+    preserves whatever the view wrote — so anything reading a header had to
+    guess which transport it was behind. Both now lowercase on the way out, and
+    every lookup here uses a lowercase literal.
+    """
+
     status: int
     headers: dict[str, str]
     content: bytes
@@ -57,7 +72,7 @@ class HttpxTransport:
             method, path.lstrip('/'), params=_flatten_params(params), json=json,
             data=data, files=files, headers=dict(headers or {}),
         )
-        return Response(r.status_code, dict(r.headers), r.content)
+        return Response(r.status_code, {k.lower(): v for k, v in r.headers.items()}, r.content)
 
     def close(self):
         self._client.close()
@@ -230,22 +245,73 @@ class ApiClient:
             raise ValueError('Pass query parameters via params=, not in the path.')
         return path if path.endswith('/') else path + '/'
 
+    def _unreachable(self, method: str, path: str, exc: Exception) -> ApiError:
+        target = getattr(self.transport, 'base_url', '') or path
+        return ApiError(
+            0, f'Could not reach {target}: {exc}', method=method, path=path,
+            hint='Check CONSULTANCY_API_URL and that the backend is running.',
+        )
+
+    def _send(self, method: str, path: str, *, params=None, json=None, data=None, files=None, headers=None) -> Response:
+        """
+        One transport call, retried once for GET when the network fails.
+
+        Only GET is replayed: it is the sole idempotent verb here, and
+        re-sending a POST that may already have been applied would duplicate
+        records. Either way the caller sees an ApiError rather than an httpx
+        exception, so every tool downstream needs one except clause, not two.
+        """
+        attempts = 2 if method.upper() == 'GET' else 1
+        last: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                return self.transport.request(
+                    method, path, params=params, json=json, data=data, files=files, headers=headers,
+                )
+            except (httpx.TransportError, OSError) as exc:
+                last = exc
+                if attempt + 1 < attempts:
+                    logger.warning('%s %s could not be sent (%s); retrying once', method, path, exc)
+                    time.sleep(NETWORK_RETRY_SECONDS)
+        raise self._unreachable(method, path, last)
+
     def request(self, method: str, path: str, *, params=None, json=None, data=None, files=None) -> Response:
         path = self._norm(path)
-        headers = self.credentials.apply(self.transport)
-        r = self.transport.request(method, path, params=params, json=json, data=data, files=files, headers=headers)
+        try:
+            # Password credentials log in on first use, so the very first call
+            # can fail at the network before any request is sent.
+            headers = self.credentials.apply(self.transport)
+        except (httpx.TransportError, OSError) as exc:
+            raise self._unreachable(method, path, exc) from exc
+        r = self._send(method, path, params=params, json=json, data=data, files=files, headers=headers)
         if r.status == 401 and not self.credentials.uses_api_key and self.credentials.refresh(self.transport):
             headers = self.credentials.apply(self.transport)
-            r = self.transport.request(method, path, params=params, json=json, data=data, files=files, headers=headers)
+            r = self._send(method, path, params=params, json=json, data=data, files=files, headers=headers)
         if r.status == 429:
             wait = 1.0
             try:
-                wait = min(float(r.headers.get('Retry-After', '1')), 5.0)
+                # Lowercase: Response.headers is normalised by every transport.
+                # Clamped at both ends — a negative Retry-After would otherwise
+                # reach time.sleep, which raises on a negative argument.
+                wait = max(0.0, min(float(r.headers.get('retry-after', '1')), 5.0))
             except ValueError:
                 pass
             logger.warning('429 on %s %s; retrying after %.1fs', method, path, wait)
             time.sleep(wait)
-            r = self.transport.request(method, path, params=params, json=json, data=data, files=files, headers=headers)
+            r = self._send(method, path, params=params, json=json, data=data, files=files, headers=headers)
+        if 300 <= r.status < 400:
+            # Redirects are deliberately not followed, so a 3xx must not slip
+            # through as a success whose empty body decodes to None.
+            location = r.headers.get('location', '')
+            raise ApiError(
+                r.status, 'Unexpected redirect', method=method, path=path,
+                hint=(
+                    (f'The server redirected to {location!r}. ' if location else 'The server redirected. ')
+                    + 'Redirects are never followed, because following one would silently drop a '
+                      'POST body. Correct the scheme and host in CONSULTANCY_API_URL (https rather '
+                      'than http is the usual cause).'
+                ),
+            )
         if r.status >= 400:
             body = r.json()
             if isinstance(body, dict):
