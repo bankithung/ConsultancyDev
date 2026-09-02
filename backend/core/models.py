@@ -1241,3 +1241,75 @@ class RecordTransfer(models.Model):
 
     def __str__(self):
         return f'{self.entity_type}#{self.entity_id}: {self.from_user_id} -> {self.to_user_id}'
+
+
+# ===========================================================================
+#  Personal API keys
+# ===========================================================================
+
+class ApiKey(models.Model):
+    """
+    A long-lived credential that lets a script or an MCP client act as ONE
+    user. It carries no permissions of its own: authentication resolves to the
+    user, and every authorization decision is then the user's role, company
+    and branch exactly as for a JWT session.
+
+    Only the sha256 of the key is stored. `prefix` (the first 12 characters)
+    exists so a user can recognise a key in a list without the hash ever being
+    shown.
+    """
+
+    KEY_PREFIX = 'cdk_'
+    KEY_RANDOM_LENGTH = 40
+
+    user = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='api_keys',
+    )
+    name = models.CharField(max_length=80)
+    prefix = models.CharField(max_length=12, db_index=True)
+    key_hash = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['user', 'revoked_at'])]
+
+    def __str__(self):
+        return f'{self.name} ({self.prefix}...)'
+
+    @staticmethod
+    def hash_key(raw):
+        import hashlib
+        return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+    @classmethod
+    def generate_raw(cls):
+        import secrets
+        alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        body = ''.join(secrets.choice(alphabet) for _ in range(cls.KEY_RANDOM_LENGTH))
+        return cls.KEY_PREFIX + body
+
+    @classmethod
+    def issue(cls, user, name, expires_at=None):
+        """Create a key and return (instance, plaintext). The plaintext is never stored."""
+        raw = cls.generate_raw()
+        instance = cls.objects.create(
+            user=user, name=name, prefix=raw[:12], key_hash=cls.hash_key(raw), expires_at=expires_at,
+        )
+        return instance, raw
+
+    @property
+    def is_valid(self):
+        if self.revoked_at is not None:
+            return False
+        if self.expires_at is not None and self.expires_at <= timezone.now():
+            return False
+        return True
+
+    def revoke(self):
+        if self.revoked_at is None:
+            self.revoked_at = timezone.now()
+            self.save(update_fields=['revoked_at'])

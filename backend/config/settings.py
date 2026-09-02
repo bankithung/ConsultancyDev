@@ -213,6 +213,9 @@ def _throttle_rates(debug):
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
+        # API keys first: they only claim `cdk_...` tokens and return None for
+        # everything else, so JWT bearer tokens fall through unchanged.
+        'core.authentication.ApiKeyAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     # Deny by default. Public endpoints opt out explicitly via get_permissions().

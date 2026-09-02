@@ -86,27 +86,31 @@ def next_reference_number(model, company_id, field, prefix):
 
 def revoke_all_tokens(user):
     """
-    Blacklist every outstanding refresh token for a user.
+    Blacklist every outstanding refresh token for a user, and revoke every
+    personal API key.
 
     Identity claims (role/company/branch) are stamped onto the refresh token
     and copied forward by rotation without re-reading the user, so a demoted
     admin would otherwise keep admin-level UI routing for the whole
     REFRESH_TOKEN_LIFETIME — up to a week. The server still refused their
     requests, but "revoke this person's access" has to visibly take effect
-    when it is done, not a week later.
+    when it is done, not a week later. API keys are long-lived by design, so
+    the same call revokes them too.
 
     Called whenever role, branch, company or active status changes.
     """
     from rest_framework_simplejwt.token_blacklist.models import (
         BlacklistedToken, OutstandingToken,
     )
+    from .models import ApiKey
 
     revoked = 0
     for token in OutstandingToken.objects.filter(user=user):
         _, created = BlacklistedToken.objects.get_or_create(token=token)
         revoked += int(created)
-    if revoked:
-        logger.info('Revoked %s outstanding token(s) for user %s', revoked, user.pk)
+    keys = ApiKey.objects.filter(user=user, revoked_at__isnull=True).update(revoked_at=timezone.now())
+    if revoked or keys:
+        logger.info('Revoked %s token(s) and %s API key(s) for user %s', revoked, keys, user.pk)
     return revoked
 
 
