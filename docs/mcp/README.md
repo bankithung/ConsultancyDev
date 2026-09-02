@@ -36,9 +36,10 @@ list and is regenerated with the catalog.
 
 Sign in to the console, open **Profile**, and use the **AI access keys** card: New key, name it,
 copy it once. The key looks like `cdk_` followed by 40 characters and is shown exactly once —
-only its hash is stored. It carries your permissions and dies when you do: changing your role,
-branch, company or password revokes it, and so does deactivating your account. Revoke it
-yourself from the same card at any time.
+only its hash is stored. It carries your permissions and dies when you do: an administrator
+changing your role, branch, company or password revokes it, and so does deactivating your
+account. Changing your own password does not — if you think a key has leaked, revoke the key
+itself, from the same card, at any time.
 
 ## Run it locally (stdio)
 

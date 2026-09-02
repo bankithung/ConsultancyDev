@@ -19,9 +19,13 @@ not open in the console.
   recognised in a list.
 - A key **inherits the owner's scope**, live. It is not a snapshot: change the user's role or
   branch and the key's reach changes with it.
-- Changing a user's role, branch, company, password, or active flag **revokes every token and key
-  they hold**, immediately. A deactivated user's keys stop working the moment they are
-  deactivated.
+- **An administrator** changing a user's role, branch, company or password — or deactivating them
+  — **revokes every token and key they hold**, immediately. A deactivated user's keys stop working
+  the moment they are deactivated.
+- Changing your **own** password does **not** — not on the Profile page, and not through the
+  `change_password` tool. That endpoint verifies the current password, sets the new one and
+  returns; it revokes nothing. A password and a key are separate secrets, so if you think a key
+  has leaked, **revoke the key**.
 - **A key cannot manage keys.** Every `api-keys/` endpoint refuses a caller who authenticated
   with an API key, so a stolen key cannot enumerate its siblings, revoke them, or mint a
   replacement. Keys are created only from a password-authenticated session — the Profile page.

@@ -70,8 +70,12 @@ For `users` and `signup-requests` the real rule differs per action, which is why
   Anything else is 403, decided inside the viewset rather than by the permission class.
 - Users edit only their own profile unless they hold manageUsers. Password changes go through
   `change_password`.
-- Changing a user's role, branch, company, password or active flag revokes all their tokens and
-  API keys immediately; that user is signed out on their next refresh.
+- An ADMINISTRATOR changing a user's role, branch, company or password, or deactivating them,
+  revokes all their tokens and API keys immediately; that user is signed out on their next
+  refresh.
+- A user changing their OWN password through `change_password` revokes nothing — not their other
+  sessions, not their API keys. Someone who suspects a key has leaked must revoke that key on the
+  console's Profile page.
 
 ## Cross-tenant rules
 

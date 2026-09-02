@@ -20,8 +20,13 @@
   token lives 15 minutes by default and the refresh 7 days with rotation, so POST
   `auth/refresh/` returns a NEW refresh and blacklists the old one. POST `auth/logout/`
   {refresh} ends the session.
-- Changing a user's role, branch, company, password or active flag revokes all of their tokens
-  and keys immediately.
+- An ADMINISTRATOR changing a user's role, branch, company or password, or deactivating them,
+  revokes all of their tokens and API keys immediately.
+- `change_password` does NOT. The self-service endpoint it calls (POST `users/change-password/`)
+  verifies the current password, sets the new one and returns; no token and no key is revoked, and
+  the caller's own key keeps working.
+  Never tell a user that changing their password deals with a leaked key: it has to be revoked as
+  a key, on the console's Profile page.
 
 ## Pagination
 
