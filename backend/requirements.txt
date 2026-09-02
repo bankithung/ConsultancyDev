@@ -29,3 +29,8 @@ python-dotenv==1.2.2
 # Optional cache backend only. channels / channels-redis / daphne were removed
 # with the real-time messaging feature.
 redis==8.1.0
+
+# Model Context Protocol server (backend/mcp_server). httpx is the HTTP client
+# it uses to talk to /api/; uvicorn and starlette arrive as mcp dependencies.
+mcp==1.26.0
+httpx==0.28.1
