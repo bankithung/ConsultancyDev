@@ -21,6 +21,12 @@ Throughout, replace:
 On Windows, give the full interpreter path (`C:/Python311/python.exe`) and use forward slashes
 throughout. They work everywhere and save you doubling every backslash, which JSON requires.
 
+`python -m mcp_server` only resolves if the process can find the package, and clients disagree
+about how you say where it is. Where a client documents `cwd` (VS Code, Gemini CLI) the blocks
+below use that alone; everywhere else they set **both** `cwd` and `PYTHONPATH` to `<BACKEND>`, so
+whichever mechanism the client honours, the import works and the other is harmless. If you ever
+see `ModuleNotFoundError: mcp_server`, it is because neither reached the process.
+
 `CONSULTANCY_API_URL` decides which backend you are working in. Point it at
 `https://console.nexxteducation.in/api/` for production or `http://127.0.0.1:8000/api/` for a
 local one, and make sure the key came from that same backend.
@@ -38,6 +44,7 @@ Settings → Developer → Edit Config, which opens `claude_desktop_config.json`
       "args": ["-m", "mcp_server"],
       "cwd": "<BACKEND>",
       "env": {
+        "PYTHONPATH": "<BACKEND>",
         "CONSULTANCY_API_URL": "https://console.nexxteducation.in/api/",
         "CONSULTANCY_API_KEY": "<KEY>"
       }
@@ -47,7 +54,8 @@ Settings → Developer → Edit Config, which opens `claude_desktop_config.json`
 ```
 
 Restart Claude Desktop afterwards. The server appears under the tools icon; ask it `whoami` to
-check the connection.
+check the connection. `cwd` and `PYTHONPATH` say the same thing twice on purpose, as above:
+either one alone makes the package importable.
 
 ## Claude Code
 
@@ -92,6 +100,7 @@ from anywhere. `claude mcp list` shows what is connected.
       "args": ["-m", "mcp_server"],
       "cwd": "<BACKEND>",
       "env": {
+        "PYTHONPATH": "<BACKEND>",
         "CONSULTANCY_API_URL": "https://console.nexxteducation.in/api/",
         "CONSULTANCY_API_KEY": "<KEY>"
       }
@@ -119,6 +128,7 @@ hosted form:
       "args": ["-m", "mcp_server"],
       "cwd": "<BACKEND>",
       "env": {
+        "PYTHONPATH": "<BACKEND>",
         "CONSULTANCY_API_URL": "https://console.nexxteducation.in/api/",
         "CONSULTANCY_API_KEY": "<KEY>"
       }
