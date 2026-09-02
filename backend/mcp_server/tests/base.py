@@ -239,10 +239,24 @@ class McpTestCase(QuietLogsMixin, TestCase):
                 return {p.name for p in (await session.list_prompts()).prompts}
         return _run(go())
 
+    def prompt_listing(self, user):
+        """The advertised prompts by name, with their descriptions and declared arguments."""
+        async def go():
+            async with create_connected_server_and_client_session(self.server_for(user)) as session:
+                return {p.name: p for p in (await session.list_prompts()).prompts}
+        return _run(go())
+
     def list_resources(self, user):
         async def go():
             async with create_connected_server_and_client_session(self.server_for(user)) as session:
                 fixed = {str(r.uri) for r in (await session.list_resources()).resources}
                 templates = {t.uriTemplate for t in (await session.list_resource_templates()).resourceTemplates}
                 return fixed, templates
+        return _run(go())
+
+    def resource_listing(self, user):
+        """The advertised fixed resources as {uri: mime_type}."""
+        async def go():
+            async with create_connected_server_and_client_session(self.server_for(user)) as session:
+                return {str(r.uri): r.mimeType for r in (await session.list_resources()).resources}
         return _run(go())
