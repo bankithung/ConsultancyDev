@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from decimal import Decimal, InvalidOperation
-from typing import Any, Callable
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from typing import Any, Callable, Union
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -112,6 +112,23 @@ DUE_SOON_DAYS = 7
 EXPIRING_DOCUMENT_DAYS = 30
 
 FORBIDDEN: dict[str, Any] = {'forbidden': True}
+
+# Every money argument's type.
+#
+# The API wants a decimal string and these tools send one, but the ARGUMENT
+# cannot be typed `str`: FastMCP validates a call against the signature before
+# the function runs, so `amount: str` makes pydantic reject `amount: 3333.34`
+# with "Input should be a valid string" and the tool never sees it. A model
+# writing a payment naturally sends a number, so all three forms are accepted
+# here and normalised to a string by _money_str on the way to the payload.
+Money = Union[int, float, str]
+
+# Two decimal places, which is what every money column on the backend stores
+# (DecimalField max_digits=12, decimal_places=2). Quantizing here rather than
+# forwarding 3333.3333 means a third decimal place is rounded, once, in the
+# same direction the server rounds an installment split -- instead of coming
+# back as a 400 the caller has to interpret.
+MONEY_PLACES = Decimal('0.01')
 
 
 # --------------------------------------------------------------------- shared
@@ -206,6 +223,30 @@ def _money(value: Any) -> float:
         return 0.0
 
 
+def _money_str(value: Money, field: str) -> str:
+    """
+    A money argument as the decimal string the API stores.
+
+    `Decimal(str(value))` and not `Decimal(value)`: the float route would turn
+    3333.34 into 3333.3400000000001091393642127513885498046875, which quantizes
+    back to the right answer but would carry its error into anything summed
+    before rounding. str() gives the shortest repr that round-trips, which is
+    the number the caller meant.
+    """
+    try:
+        amount = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        raise ToolError(f'{field} must be a number — 1500, 1500.50 or "1500.50" — not {value!r}.') from None
+    if not amount.is_finite():
+        raise ToolError(f'{field} must be a finite number, not {value!r}.')
+    if amount < 0:
+        raise ToolError(f'{field} cannot be negative; got {value!r}. Record a repayment as a refund.')
+    try:
+        return str(amount.quantize(MONEY_PLACES, rounding=ROUND_HALF_UP))
+    except InvalidOperation:
+        raise ToolError(f'{field} is too large to store as money: {value!r}.') from None
+
+
 def _day(value: Any) -> str:
     """
     The calendar day of a date or datetime AS THE SERVER RENDERED IT.
@@ -231,6 +272,10 @@ def build_registration_from_enquiry(enquiry: dict, registration_fee: Any, paymen
     Blank values are skipped rather than copied, so an enquiry that never
     recorded a mother's occupation leaves the registration's column at its own
     default instead of writing an empty string over it.
+
+    `registration_fee` is stringified as given, not normalised: the tool has
+    already put it through _money_str, and doing it twice here would make this
+    function's output depend on how it was reached.
     """
     body: dict[str, Any] = {}
     for source, destination in ENQUIRY_TO_REGISTRATION:
@@ -451,13 +496,14 @@ def register_workflow_tools(mcp: FastMCP, state: ServerState) -> None:
 
     # ------------------------------------------------------------- the writes
 
-    def convert_enquiry_to_registration(ctx: Context, enquiry_id: int, registration_fee: str,
+    def convert_enquiry_to_registration(ctx: Context, enquiry_id: int, registration_fee: Money,
                                         payment_status: str = 'Pending', payment_method: str = 'Cash',
                                         needs_loan: bool = False, overrides: dict[str, Any] | None = None,
                                         mark_converted: bool = True) -> dict[str, Any]:
+        fee = _money_str(registration_fee, 'registration_fee')
         client = client_for(ctx, state)
         enquiry = run_api(lambda: client.get(f'enquiries/{enquiry_id}/'))
-        body = build_registration_from_enquiry(enquiry, registration_fee, payment_status,
+        body = build_registration_from_enquiry(enquiry, fee, payment_status,
                                                payment_method, needs_loan, overrides)
         payload = _clean(catalog, 'registrations', body)
         registration = run_api(lambda: client.post('registrations/', json=payload))
@@ -472,13 +518,14 @@ def register_workflow_tools(mcp: FastMCP, state: ServerState) -> None:
         return registration
 
     def enroll_student(ctx: Context, registration_id: int, program_name: str, start_date: str,
-                       duration_months: int, total_fees: str, university: int | None = None,
+                       duration_months: int, total_fees: Money, university: int | None = None,
                        university_name: str = '', country: str = '', installments_count: int = 0,
-                       installment_amount: str | None = None,
-                       commission_amount: str | None = None) -> dict[str, Any]:
+                       installment_amount: Money | None = None,
+                       commission_amount: Money | None = None) -> dict[str, Any]:
         body: dict[str, Any] = {
             'student': registration_id, 'program_name': program_name, 'start_date': start_date,
-            'duration_months': int(duration_months), 'total_fees': str(total_fees),
+            'duration_months': int(duration_months),
+            'total_fees': _money_str(total_fees, 'total_fees'),
             'university_name': university_name, 'country': country,
         }
         if university:
@@ -486,18 +533,19 @@ def register_workflow_tools(mcp: FastMCP, state: ServerState) -> None:
         if installments_count:
             body['installments_count'] = int(installments_count)
         if installment_amount is not None:
-            body['installment_amount'] = str(installment_amount)
+            body['installment_amount'] = _money_str(installment_amount, 'installment_amount')
         if commission_amount is not None:
-            body['commission_amount'] = str(commission_amount)
+            body['commission_amount'] = _money_str(commission_amount, 'commission_amount')
         payload = _clean(catalog, 'enrollments', body)
         client = client_for(ctx, state)
         return run_api(lambda: client.post('enrollments/', json=payload))
 
-    def record_payment(ctx: Context, amount: str, method: str = 'Cash', type: str = 'Enrollment',
+    def record_payment(ctx: Context, amount: Money, method: str = 'Cash', type: str = 'Enrollment',
                        registration: int | None = None, enrollment: int | None = None,
                        installment: int | None = None, student_name: str | None = None,
                        reference: str = '', status: str = 'Success',
                        metadata: dict[str, Any] | None = None, date: str | None = None) -> dict[str, Any]:
+        money = _money_str(amount, 'amount')
         if type not in PAYMENT_TYPES:
             raise ToolError(f'type must be one of {", ".join(PAYMENT_TYPES)}; got {type!r}.')
         if status not in PAYMENT_STATUSES:
@@ -528,7 +576,7 @@ def register_workflow_tools(mcp: FastMCP, state: ServerState) -> None:
                 raise ToolError('Provide student_name, or a registration or enrollment to derive it from.')
 
         body: dict[str, Any] = {
-            'amount': str(amount), 'method': method, 'type': type, 'status': status,
+            'amount': money, 'method': method, 'type': type, 'status': status,
             'reference': reference, 'student_name': student_name, 'metadata': detail,
         }
         for field, value in (('registration', registration), ('enrollment', enrollment),
@@ -682,12 +730,12 @@ def register_workflow_tools(mcp: FastMCP, state: ServerState) -> None:
         'by `enquiry`, then set the enquiry status to Converted (pass mark_converted=false to leave it). '
         'The server assigns registration_no and creates the registration-fee Payment — type Registration, '
         'status Success only when payment_status is "Paid" (any case), otherwise Pending — so do not record '
-        'that payment yourself. registration_fee is required. `overrides` is a dict of registration fields '
+        'that payment yourself. registration_fee is required and may be a number or a decimal string (1500, 1500.5 and "1500.50" all mean the same). `overrides` is a dict of registration fields '
         'that replace copied values (for example a corrected mobile); an unknown field is refused before '
         'anything is written. A 404 means the enquiry is missing or outside your scope.'
     )
     enroll_student.__doc__ = (
-        'Enroll a registered student on a program (POST /api/enrollments/). start_date is YYYY-MM-DD. With '
+        'Enroll a registered student on a program (POST /api/enrollments/). start_date is YYYY-MM-DD. total_fees, installment_amount and commission_amount may be numbers or decimal strings. With '
         'installments_count > 0 the SERVER builds that many Installment rows: amounts sum exactly to '
         'total_fees (the last absorbs the rounding) and due dates step whole calendar months from '
         'start_date. installment_amount optionally fixes the per-row amount. Never build a schedule '
@@ -696,7 +744,7 @@ def register_workflow_tools(mcp: FastMCP, state: ServerState) -> None:
     )
     record_payment.__doc__ = (
         'Record a payment (POST /api/payments/). Link it to a registration and/or an enrollment, and to an '
-        'installment when settling one. type: Registration, Enrollment or Other. status: Pending, Success, '
+        'installment when settling one. amount may be a number or a decimal string. type: Registration, Enrollment or Other. status: Pending, Success, '
         'Failed or Refunded — only Success counts as revenue. Method-specific detail goes in `metadata`, '
         'which must hold exactly the keys for the method: Cheque cheque_no and bank, UPI upi_id, Card '
         'card_last4 and card_network, Cash none. Those are the five keys the web console stores and '

@@ -14,6 +14,7 @@ for the paths a test names and the real backend serves the rest.
 """
 
 import datetime as dt
+from decimal import Decimal
 
 from core.models import Enquiry, Enrollment, Installment, Payment, Registration
 from mcp_server.client import Response
@@ -253,6 +254,68 @@ class WorkflowToolTests(McpTestCase):
                                                        student_name='S', type='Nonsense'))
         self.assertIn('Success', self.call_raises('record_payment', self.mgr_k, amount='1',
                                                   student_name='S', status='Nonsense'))
+
+    def test_money_arguments_accept_numbers_as_well_as_strings(self):
+        """
+        A live stdio session found this: FastMCP validates the call against the
+        signature BEFORE the function runs, so a money argument typed `str`
+        made pydantic reject `registration_fee: 1500` with "Input should be a
+        valid string" and the tool never saw it. Every model sends numbers
+        here, so all three forms have to arrive — and every one of these calls
+        goes through the protocol, which is the only place that check happens.
+        """
+        reg = self.call('convert_enquiry_to_registration', self.mgr_k, enquiry_id=self.enq_k2.pk,
+                        registration_fee=1500)
+        self.assertEqual(Registration.objects.get(pk=reg['id']).registration_fee, Decimal('1500.00'))
+
+        enr = self.call('enroll_student', self.mgr_k, registration_id=reg['id'], program_name='MBBS',
+                        start_date='2026-10-01', duration_months=12, total_fees=10000.5,
+                        installments_count=3, commission_amount=250)
+        row = Enrollment.objects.get(pk=enr['id'])
+        self.assertEqual(row.total_fees, Decimal('10000.50'))
+        self.assertEqual(row.commission_amount, Decimal('250.00'))
+        self.assertEqual(sum(i.amount for i in row.installments.all()), Decimal('10000.50'))
+
+        by_float = self.call('record_payment', self.mgr_k, amount=3333.34, enrollment=enr['id'])
+        by_int = self.call('record_payment', self.mgr_k, amount=500, enrollment=enr['id'])
+        by_text = self.call('record_payment', self.mgr_k, amount='250.5', enrollment=enr['id'])
+        self.assertEqual([Payment.objects.get(pk=p['id']).amount for p in (by_float, by_int, by_text)],
+                         [Decimal('3333.34'), Decimal('500.00'), Decimal('250.50')])
+
+    def test_enroll_student_accepts_a_numeric_installment_amount(self):
+        reg = self.call('convert_enquiry_to_registration', self.mgr_k, enquiry_id=self.enq_k2.pk,
+                        registration_fee='1000')
+        enr = self.call('enroll_student', self.mgr_k, registration_id=reg['id'], program_name='MBBS',
+                        start_date='2026-10-01', duration_months=12, total_fees=900,
+                        installments_count=3, installment_amount=300)
+        self.assertEqual([i['amount'] for i in enr['installments']], ['300.00', '300.00', '300.00'])
+
+    def test_money_arguments_round_to_two_places(self):
+        """A third decimal place is rounded here, not returned as a 400 from DRF."""
+        reg = self.call('convert_enquiry_to_registration', self.mgr_k, enquiry_id=self.enq_k2.pk,
+                        registration_fee=1500.005)
+        self.assertEqual(Registration.objects.get(pk=reg['id']).registration_fee, Decimal('1500.01'))
+
+    def test_money_arguments_refuse_what_is_not_a_number(self):
+        for tool, arguments, field in (
+            ('convert_enquiry_to_registration', {'enquiry_id': self.enq_k2.pk, 'registration_fee': 'free'},
+             'registration_fee'),
+            ('record_payment', {'amount': 'lots', 'student_name': 'S'}, 'amount'),
+        ):
+            with self.subTest(tool=tool):
+                text = self.call_raises(tool, self.mgr_k, **arguments)
+                self.assertIn(field, text)
+                self.assertIn('must be a number', text)
+        self.assertFalse(Registration.objects.filter(enquiry_id=self.enq_k2.pk).exists())
+        self.assertFalse(Payment.objects.filter(student_name='S').exists())
+
+    def test_money_arguments_refuse_a_negative_amount(self):
+        text = self.call_raises('record_payment', self.mgr_k, amount=-50, student_name='S')
+        self.assertIn('cannot be negative', text)
+
+    def test_money_arguments_refuse_a_non_finite_number(self):
+        text = self.call_raises('record_payment', self.mgr_k, amount='NaN', student_name='S')
+        self.assertIn('finite', text)
 
     def test_student_360_gathers_everything(self):
         reg = self.call('convert_enquiry_to_registration', self.mgr_k, enquiry_id=self.enq_k2.pk, registration_fee='1000', payment_status='Paid')
