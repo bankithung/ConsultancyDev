@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, Check, Copy, KeyRound, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -51,8 +51,27 @@ const STATUS_CLASS: Record<KeyStatus, string> = {
   Revoked: 'border-transparent bg-slate-100 text-slate-500 hover:bg-slate-100',
 };
 
+/**
+ * The API base URL to advertise in the snippet.
+ *
+ * Deliberately NOT the `API_URL` constant: when `NEXT_PUBLIC_API_URL` is unset
+ * that falls back to `http://127.0.0.1:8000/api/`, and pasting a localhost URL
+ * into the config of someone using a deployed console hands them a client that
+ * talks to their own machine. The browser's own origin is the better guess
+ * there, since an unset var means the app is being served same-origin.
+ *
+ * Called during render of a client component; `window` is guarded anyway so a
+ * server prerender falls back to the shared constant rather than throwing.
+ */
+function resolveApiUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+  if (configured) return configured.endsWith('/') ? configured : `${configured}/`;
+  if (typeof window !== 'undefined') return `${window.location.origin}/api/`;
+  return API_URL;
+}
+
 /** The stdio client config, with this deployment's API URL already filled in. */
-function mcpConfigSnippet(key: string): string {
+function mcpConfigSnippet(key: string, apiUrl: string): string {
   return JSON.stringify(
     {
       mcpServers: {
@@ -60,8 +79,7 @@ function mcpConfigSnippet(key: string): string {
           command: 'python',
           args: ['-m', 'mcp_server'],
           cwd: '<path to>/ConsultancyDev/backend',
-          // API_URL is normalised with a trailing slash in lib/api.ts.
-          env: { CONSULTANCY_API_URL: API_URL, CONSULTANCY_API_KEY: key },
+          env: { CONSULTANCY_API_URL: apiUrl, CONSULTANCY_API_KEY: key },
         },
       },
     },
@@ -110,15 +128,31 @@ export function ApiKeysCard() {
     },
   });
 
-  /** Closes the reveal modal and drops the plaintext key from memory. */
+  /**
+   * Closes the reveal modal and drops the plaintext key from memory.
+   *
+   * `create.reset()` matters as much as clearing our own state: the mutation
+   * observer holds its last result, and that result IS the `ApiKeyCreated`
+   * object with the plaintext in it. Without the reset the key stays reachable
+   * for the life of the page, and for `gcTime` after unmount.
+   */
   const dismissCreated = () => {
     setCreated(null);
     setCopied(null);
+    create.reset();
   };
+
+  // Same reason, for the user who navigates away with the modal still open.
+  // `reset` is bound once by the mutation observer and keeps a stable identity
+  // across renders, so this cleanup runs on unmount only.
+  const resetCreate = create.reset;
+  useEffect(() => () => resetCreate(), [resetCreate]);
+
+  const apiUrl = resolveApiUrl();
 
   const copy = async (what: 'key' | 'config') => {
     if (!created) return;
-    const text = what === 'key' ? created.key : mcpConfigSnippet(created.key);
+    const text = what === 'key' ? created.key : mcpConfigSnippet(created.key, apiUrl);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(what);
@@ -334,7 +368,7 @@ export function ApiKeysCard() {
                 </Button>
               </div>
               <pre className="max-h-56 overflow-auto rounded-md bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">
-                {mcpConfigSnippet(created.key)}
+                {mcpConfigSnippet(created.key, apiUrl)}
               </pre>
               <p className="text-xs text-slate-500">
                 Running the server over HTTP instead (
