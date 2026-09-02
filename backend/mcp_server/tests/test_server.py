@@ -4,6 +4,7 @@ os.environ.setdefault('DJANGO_ALLOW_ASYNC_UNSAFE', 'true')
 
 from django.test import SimpleTestCase
 from mcp.server.fastmcp.exceptions import ToolError
+from mcp.shared.memory import create_connected_server_and_client_session
 from starlette.datastructures import Headers
 from starlette.testclient import TestClient
 
@@ -11,10 +12,10 @@ from mcp_server.auth import AuthError, resolve_credentials
 from mcp_server.catalog import load_catalog
 from mcp_server.client import ApiError
 from mcp_server.config import Settings
-from mcp_server.server import ServerState, client_for, create_http_app, run_api
+from mcp_server.server import ServerState, build_server, client_for, create_http_app, run_api
 from mcp_server.testing import DjangoTestTransport
 
-from .base import McpTestCase, QuietLogsMixin
+from .base import CATALOG, McpTestCase, QuietLogsMixin, _run
 
 
 class _StubRequestContext:
@@ -141,6 +142,29 @@ class CredentialResolutionTests(SimpleTestCase):
             resolve_credentials(_StubContext(headers={}), Settings(api_key='cdk_ignored'))
         self.assertIn('Authorization', str(ctx.exception))
 
+    def test_hosted_mode_never_falls_back_to_a_server_wide_credential(self):
+        """
+        Spec 7.3: in Streamable HTTP mode there is no server-wide credential.
+
+        Deciding that by "is a Starlette request in flight" leaves the property
+        circumstantial rather than structural: an SDK context anomaly, or any
+        future path that reaches a tool outside a request, would silently act
+        as whoever owns the server's environment instead of as the caller.
+        Nothing stops an operator putting CONSULTANCY_API_KEY in .env.mcp, so
+        the transport decides, and it decides before the fallback is reached.
+        """
+        hosted = Settings(transport='streamable-http', api_key='cdk_server_owner',
+                          username='owner', password='pw')
+        for label, ctx in (('no context', None),
+                           ('context that raises', _StubContext(raises=ValueError('no request'))),
+                           ('context with request=None', _StubContext(headers=None))):
+            with self.subTest(context=label):
+                with self.assertRaises(AuthError) as exc:
+                    resolve_credentials(ctx, hosted)
+                message = str(exc.exception)
+                self.assertIn('per-request Authorization header', message)
+                self.assertNotIn('cdk_server_owner', message)
+
     def test_http_with_a_malformed_header_raises_auth_error(self):
         with self.assertRaises(AuthError):
             resolve_credentials(_StubContext(headers={'authorization': 'Bearer a b c'}), Settings())
@@ -261,6 +285,36 @@ class ClientForTests(McpTestCase):
             run_api(lambda: 1 / 0)
         with self.assertRaises(ApiError):
             raise ApiError(500, 'boom')
+
+
+class HostedModeCredentialTests(McpTestCase):
+    """
+    The same invariant, proved through the assembled server rather than the
+    one function: a hosted server holding an API key in its settings must
+    still refuse a tool call that arrives without a caller header.
+    """
+
+    def _hosted_call(self, name, key_owner, **arguments):
+        settings = Settings(api_url='http://testserver/api/', api_key=self.key_for(key_owner),
+                            transport='streamable-http')
+        server = build_server(settings, transport=DjangoTestTransport(), catalog=CATALOG)
+
+        async def go():
+            async with create_connected_server_and_client_session(server) as session:
+                return await session.call_tool(name, arguments)
+
+        return _run(go())
+
+    def test_a_tool_without_a_request_refuses_instead_of_acting_as_the_key_owner(self):
+        result = self._hosted_call('whoami', self.admin)
+        self.assertTrue(result.isError, 'a hosted call with no caller header must not succeed')
+        text = ''.join(c.text for c in result.content if getattr(c, 'type', '') == 'text')
+        self.assertIn('per-request Authorization header', text)
+        self.assertNotIn(self.key_for(self.admin), text)
+
+    def test_stdio_with_the_same_key_still_works(self):
+        """The guard is about the transport, not about the key being present."""
+        self.assertEqual(self.call('whoami', self.admin)['user']['username'], 'admin')
 
 
 class TransportSecurityTests(QuietLogsMixin, SimpleTestCase):
