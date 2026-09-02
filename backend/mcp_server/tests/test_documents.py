@@ -187,6 +187,53 @@ class DocumentToolTests(McpTestCase):
             self.assertIn('does not exist', text)
             self.assertFalse(target.parent.exists())
 
+    def test_save_to_an_existing_file_is_refused_without_overwrite(self):
+        """
+        readOnlyHint stays true on this tool because the local save is what it
+        is for, so the guard against clobbering has to live here: an existing
+        file is never replaced unless the caller says so in the same call.
+        """
+        doc = self.upload(self.emp_k1)
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'out.pdf'
+            target.write_bytes(b'do not clobber me')
+            text = self.call_raises('download_document', self.emp_k1, id=doc['id'], save_to=str(target))
+            self.assertIn('already exists', text)
+            self.assertIn('overwrite', text)
+            self.assertEqual(target.read_bytes(), b'do not clobber me')
+
+    def test_save_to_replaces_an_existing_file_with_overwrite(self):
+        doc = self.upload(self.emp_k1)
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'out.pdf'
+            target.write_bytes(b'stale bytes')
+            got = self.call('download_document', self.emp_k1, id=doc['id'],
+                            save_to=str(target), overwrite=True)
+            self.assertEqual(Path(got['saved_to']), target.resolve())
+            self.assertEqual(target.read_bytes(), PDF)
+
+    def test_overwrite_alone_writes_nothing(self):
+        """overwrite is about save_to and must not turn a plain read into a write."""
+        doc = self.upload(self.emp_k1)
+        got = self.call('download_document', self.emp_k1, id=doc['id'], overwrite=True)
+        self.assertEqual(base64.b64decode(got['base64']), PDF)
+        self.assertNotIn('saved_to', got)
+
+    def test_a_save_to_refusal_is_decided_before_the_download(self):
+        """
+        The target is judged first, so a refusal costs no bytes — and the
+        hosted rule is stated in terms of the filesystem rather than whatever
+        the fetch would have said. The id here does not exist: reaching the API
+        would answer 404 instead.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            payload, error = self.call_tuned('download_document', self.admin,
+                                             {'id': 10_000_001, 'save_to': str(Path(tmp) / 'out.pdf')},
+                                             transport='streamable-http')
+        self.assertIsNone(payload)
+        self.assertIn('save_to is not available here', error)
+        self.assertNotIn('404', error)
+
     def test_file_path_that_is_a_directory_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             text = self.call_raises('upload_document', self.emp_k1, file_name='x.pdf', file_path=tmp)
@@ -287,6 +334,18 @@ class DocumentToolTests(McpTestCase):
         self.assertFalse(upload.readOnlyHint)
         self.assertFalse(upload.destructiveHint)
         self.assertFalse(upload.idempotentHint)
+        self.assertTrue(tools['download_document'].annotations.readOnlyHint)
+
+    def test_the_description_declares_that_save_to_writes_a_local_file(self):
+        """
+        The annotation says readOnlyHint: nothing on the SERVER changes. The
+        one thing that does change is a file on the caller's own machine, so
+        the description has to say so where a client will read it.
+        """
+        tools = self.tool_names(self.admin)
+        description = tools['download_document'].description
+        self.assertIn('writes a local file', description)
+        self.assertIn('overwrite', description)
         self.assertTrue(tools['download_document'].annotations.readOnlyHint)
 
     def test_descriptions_carry_the_server_limits(self):

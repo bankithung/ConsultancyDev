@@ -16,7 +16,8 @@ model, the server and the filesystem all belong to one person. Hosted over HTTP
 the caller is remote and untrusted with this process's disk: honouring a path
 there would let them read any file the server can read, and write anywhere it
 can write. Nothing outside the named path is ever touched — a missing parent
-directory is an error, not something to create.
+directory is an error, not something to create, and a file that is already
+there is an error unless the caller passed overwrite=true.
 """
 
 from __future__ import annotations
@@ -72,7 +73,20 @@ def _read_local(file_path: str, stdio: bool) -> bytes:
         raise ToolError(f'Could not read {file_path}: {exc}') from exc
 
 
-def _write_local(save_to: str, content: bytes, stdio: bool) -> Path:
+def _local_target(save_to: str, stdio: bool, overwrite: bool) -> Path:
+    """
+    The path save_to names, or a ToolError explaining why it cannot be written.
+
+    Judged BEFORE the download runs. A refusal then costs no bytes, and the
+    hosted caller is told the filesystem rule rather than whatever the fetch
+    would have answered first.
+
+    An existing file is refused unless the caller asked for it in the same
+    call. download_document keeps readOnlyHint — nothing on the server changes,
+    and saving the file locally is what the argument is for — so a client will
+    not stop to confirm it, and a silent replace would be the tool quietly
+    destroying a file nobody named twice.
+    """
     if not stdio:
         raise ToolError(f'save_to is not available here. {HOSTED_NOTE} '
                         'Call again without save_to and the file comes back as base64.')
@@ -82,6 +96,13 @@ def _write_local(save_to: str, content: bytes, stdio: bool) -> Path:
     if not target.parent.is_dir():
         raise ToolError(f'save_to {save_to}: the directory {target.parent} does not exist. Only the file '
                         'you name is written — no directories are created — so create it first.')
+    if target.exists() and not overwrite:
+        raise ToolError(f'save_to {save_to} already exists and nothing was written. Call again with '
+                        'overwrite=true to replace it, or name a path that does not exist.')
+    return target
+
+
+def _write_local(target: Path, save_to: str, content: bytes) -> Path:
     try:
         target.write_bytes(content)
     except OSError as exc:
@@ -154,8 +175,11 @@ def register_document_tools(mcp: FastMCP, state: ServerState) -> None:
         return run_api(lambda: client.post('documents/', data=data,
                                            files={'file': (file_name, content, content_type)}))
 
-    def download_document(ctx: Context, id: int, save_to: str | None = None) -> dict[str, Any]:
-        """Download the decrypted file for a Document (GET /api/documents/{id}/download/). Returns {id, file_name, content_type, size} plus base64, or saved_to, or a note. With save_to — available only when this server runs locally over stdio — the bytes are written to that exact path (which must not be a directory, and whose directory must already exist) and none are returned. A 404 means the document is missing, outside your scope, or has no stored file."""
+    def download_document(ctx: Context, id: int, save_to: str | None = None,
+                          overwrite: bool = False) -> dict[str, Any]:
+        """Download the decrypted file for a Document (GET /api/documents/{id}/download/). Returns {id, file_name, content_type, size} plus base64, or saved_to, or a note. With save_to — available only when this server runs locally over stdio — this tool writes a local file: the bytes go to that exact path (which must not be a directory, and whose directory must already exist) and none are returned. An existing file is refused, not replaced, unless you also pass overwrite=true. A 404 means the document is missing, outside your scope, or has no stored file."""
+        # The target is settled before the fetch: see _local_target.
+        target = _local_target(save_to, settings.stdio, overwrite) if save_to else None
         client = client_for(ctx, state)
         response = run_api(lambda: client.raw_get(f'documents/{id}/download/'))
         content = response.content
@@ -166,8 +190,8 @@ def register_document_tools(mcp: FastMCP, state: ServerState) -> None:
             'content_type': response.headers.get('content-type', 'application/octet-stream'),
             'size': len(content),
         }
-        if save_to:
-            meta['saved_to'] = str(_write_local(save_to, content, settings.stdio))
+        if target is not None:
+            meta['saved_to'] = str(_write_local(target, save_to, content))
             return meta
         if len(content) <= settings.max_download_bytes:
             meta['base64'] = base64.b64encode(content).decode('ascii')
