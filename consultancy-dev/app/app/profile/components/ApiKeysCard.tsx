@@ -70,16 +70,28 @@ function resolveApiUrl(): string {
   return API_URL;
 }
 
-/** The stdio client config, with this deployment's API URL already filled in. */
+/**
+ * The stdio client config, with this deployment's API URL already filled in.
+ *
+ * `cwd` and PYTHONPATH name the same directory on purpose, as docs/mcp/clients.md
+ * does: clients disagree about which one they honour, and either alone makes
+ * `python -m mcp_server` resolve. Setting both means the snippet works wherever
+ * it is pasted.
+ */
 function mcpConfigSnippet(key: string, apiUrl: string): string {
+  const backend = '<path to>/ConsultancyDev/backend';
   return JSON.stringify(
     {
       mcpServers: {
         'consultancy-dev': {
           command: 'python',
           args: ['-m', 'mcp_server'],
-          cwd: '<path to>/ConsultancyDev/backend',
-          env: { CONSULTANCY_API_URL: apiUrl, CONSULTANCY_API_KEY: key },
+          cwd: backend,
+          env: {
+            PYTHONPATH: backend,
+            CONSULTANCY_API_URL: apiUrl,
+            CONSULTANCY_API_KEY: key,
+          },
         },
       },
     },
