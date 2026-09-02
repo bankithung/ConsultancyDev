@@ -26,6 +26,11 @@ def _int(raw: str | None, default: int) -> int:
         return default
 
 
+def _csv(raw: str | None) -> tuple[str, ...]:
+    """A comma-separated env list -> tuple (a Settings field must stay hashable)."""
+    return tuple(part.strip() for part in (raw or '').split(',') if part.strip())
+
+
 def _float(raw: str | None, default: float) -> float:
     if raw is None:
         return default
@@ -47,6 +52,12 @@ class Settings:
     host: str = '127.0.0.1'
     port: int = 8765
     timeout_seconds: float = 30.0
+    # Extra Host / Origin header values accepted in streamable-http mode. Empty
+    # means loopback only, which is what a client on this machine sends. Behind
+    # a reverse proxy the Host is the public name, so it must be listed here or
+    # every proxied request answers 421. See server.transport_security_for.
+    allowed_hosts: tuple[str, ...] = ()
+    allowed_origins: tuple[str, ...] = ()
 
     @property
     def stdio(self) -> bool:
@@ -79,6 +90,8 @@ def load_settings(env: Mapping[str, str] | None = None, overrides: dict[str, Any
         host=source.get('CONSULTANCY_MCP_HOST', '127.0.0.1'),
         port=_int(source.get('CONSULTANCY_MCP_PORT'), 8765),
         timeout_seconds=_float(source.get('CONSULTANCY_MCP_TIMEOUT_SECONDS'), 30.0),
+        allowed_hosts=_csv(source.get('CONSULTANCY_MCP_ALLOWED_HOSTS')),
+        allowed_origins=_csv(source.get('CONSULTANCY_MCP_ALLOWED_ORIGINS')),
     )
     if overrides:
         clean = {k: v for k, v in overrides.items() if v is not None}

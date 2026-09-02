@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "consultancy-dev": {
+      "command": "python",
+      "args": ["-m", "mcp_server"],
+      "cwd": "backend",
+      "env": {
+        "PYTHONPATH": "backend",
+        "CONSULTANCY_API_URL": "${CONSULTANCY_API_URL:-http://127.0.0.1:8000/api/}",
+        "CONSULTANCY_API_KEY": "${CONSULTANCY_API_KEY}"
+      }
+    }
+  }
+}

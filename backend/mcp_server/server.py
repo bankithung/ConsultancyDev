@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -29,11 +30,40 @@ List tools accept `filters` (multi-value params are lists), `search`, `ordering`
 """
 
 
+# What a client running on this machine sends as Host/Origin. FastMCP installs
+# the same list itself when it binds a loopback address, and installs NOTHING
+# when it binds anything else; both are wrong for a proxied deployment, so the
+# settings are always built here instead.
+LOOPBACK_HOSTS = ('127.0.0.1', 'localhost', '[::1]', '127.0.0.1:*', 'localhost:*', '[::1]:*')
+LOOPBACK_ORIGINS = ('http://127.0.0.1:*', 'http://localhost:*', 'http://[::1]:*')
+
+
 @dataclass
 class ServerState:
     settings: Settings
     catalog: Catalog
     transport: Transport
+
+
+def transport_security_for(settings: Settings) -> TransportSecuritySettings:
+    """
+    Which Host and Origin headers the HTTP transport will answer.
+
+    Protection stays ON always. Behind nginx the Host header is the public name
+    (`proxy_set_header Host $host`), which is not a loopback address, so the
+    deployment must name itself in CONSULTANCY_MCP_ALLOWED_HOSTS; otherwise
+    every proxied request answers 421 and the server looks dead while the
+    process is healthy. Loopback is always allowed so a local client keeps
+    working with no configuration at all.
+
+    Origin is only sent by browser-based clients. An absent Origin passes, so
+    CONSULTANCY_MCP_ALLOWED_ORIGINS is needed only for those.
+    """
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[*LOOPBACK_HOSTS, *settings.allowed_hosts],
+        allowed_origins=[*LOOPBACK_ORIGINS, *settings.allowed_origins],
+    )
 
 
 def configure_logging(settings: Settings) -> None:
@@ -83,6 +113,7 @@ def build_server(settings: Settings, transport: Transport | None = None,
         name='consultancy-dev', instructions=INSTRUCTIONS,
         host=settings.host, port=settings.port, streamable_http_path='/mcp',
         stateless_http=True, json_response=True,
+        transport_security=transport_security_for(settings),
     )
     register_auth_tools(mcp, state)
     register_generated_tools(mcp, state)
@@ -112,6 +143,11 @@ class BearerRequiredMiddleware(BaseHTTPMiddleware):
 
 def create_http_app(settings: Settings, transport: Transport | None = None,
                     catalog: Catalog | None = None):
+    if not settings.allowed_hosts:
+        # Said once at startup rather than left to be diagnosed from a wall of
+        # 421s: the symptom (every request refused) does not name its cause.
+        logger.warning('CONSULTANCY_MCP_ALLOWED_HOSTS is empty: only loopback Host headers are '
+                       'accepted. Behind a reverse proxy, set it to the public hostname.')
     mcp = build_server(settings, transport=transport, catalog=catalog)
 
     @mcp.custom_route('/health', methods=['GET'])

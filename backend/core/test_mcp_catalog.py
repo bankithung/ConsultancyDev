@@ -14,6 +14,12 @@ from core.models import Capability, Role
 from core.urls import router
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / 'mcp_server' / 'catalog.json'
+TOOLS_DOC_PATH = Path(__file__).resolve().parent.parent.parent / 'docs' / 'mcp' / 'tools.md'
+
+
+def _without_generated_at(markdown):
+    """Compare the content, not the timestamp, if one is ever added."""
+    return [line for line in markdown.splitlines() if not line.lower().startswith('generated at')]
 
 
 class CatalogBuildTests(SimpleTestCase):
@@ -239,4 +245,20 @@ class CatalogFreshnessTests(SimpleTestCase):
         self.assertEqual(
             committed, current,
             'mcp_server/catalog.json is stale. Run: python manage.py export_mcp_catalog',
+        )
+
+    def test_committed_tools_doc_matches_the_renderer(self):
+        """
+        docs/mcp/tools.md is generated (`export_mcp_catalog --docs`) and read by
+        people, not by code, so nothing else would ever notice it going stale.
+        """
+        self.assertTrue(
+            TOOLS_DOC_PATH.exists(),
+            'Run: python manage.py export_mcp_catalog --docs ../docs/mcp/tools.md',
+        )
+        committed = _without_generated_at(TOOLS_DOC_PATH.read_text(encoding='utf-8'))
+        current = _without_generated_at(mcp_catalog.render_tools_markdown(mcp_catalog.build_catalog()))
+        self.assertEqual(
+            committed, current,
+            'docs/mcp/tools.md is stale. Run: python manage.py export_mcp_catalog --docs ../docs/mcp/tools.md',
         )

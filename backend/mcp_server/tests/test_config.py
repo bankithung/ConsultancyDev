@@ -43,3 +43,24 @@ class LoadSettingsTests(SimpleTestCase):
     def test_bad_int_falls_back_to_default(self):
         s = load_settings(env={'CONSULTANCY_MCP_MAX_DOWNLOAD_BYTES': 'lots'})
         self.assertEqual(s.max_download_bytes, 5 * 1024 * 1024)
+
+    def test_allowed_hosts_and_origins_default_to_nothing_extra(self):
+        s = load_settings(env={})
+        self.assertEqual(s.allowed_hosts, ())
+        self.assertEqual(s.allowed_origins, ())
+
+    def test_allowed_hosts_and_origins_are_comma_separated(self):
+        s = load_settings(env={
+            'CONSULTANCY_MCP_ALLOWED_HOSTS': 'console.nexxteducation.in, console.nexxteducation.in:443',
+            'CONSULTANCY_MCP_ALLOWED_ORIGINS': 'https://console.nexxteducation.in',
+        })
+        self.assertEqual(s.allowed_hosts, ('console.nexxteducation.in', 'console.nexxteducation.in:443'))
+        self.assertEqual(s.allowed_origins, ('https://console.nexxteducation.in',))
+
+    def test_blank_entries_in_the_host_list_are_dropped(self):
+        s = load_settings(env={'CONSULTANCY_MCP_ALLOWED_HOSTS': ' , a.example.com ,, '})
+        self.assertEqual(s.allowed_hosts, ('a.example.com',))
+
+    def test_settings_stay_hashable_so_they_can_be_shared(self):
+        """Frozen dataclass: the host lists are tuples, not lists."""
+        hash(load_settings(env={'CONSULTANCY_MCP_ALLOWED_HOSTS': 'a.example.com'}))

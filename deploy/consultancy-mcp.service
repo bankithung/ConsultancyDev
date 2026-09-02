@@ -1,0 +1,43 @@
+# MCP server for AI clients. Install:
+#   cp deploy/consultancy-mcp.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now consultancy-mcp
+[Unit]
+Description=Consultancy MCP server (Streamable HTTP)
+After=network.target consultancy-backend.service
+Wants=consultancy-backend.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/consultancy/backend
+
+# Deliberately NOT the backend's .env. This process never touches the database
+# and holds no credential of its own: every request carries the caller's own
+# API key. Giving it DATABASE_URL, JWT_PRIVATE_KEY_B64 and FIELD_ENCRYPTION_KEY
+# would hand it secrets it has no use for. The leading '-' makes the file
+# optional; create it only if you want to override something below.
+EnvironmentFile=-/opt/consultancy/backend/.env.mcp
+
+# The MCP server calls the API like any other client, over the loopback.
+Environment=CONSULTANCY_API_URL=http://127.0.0.1:8000/api/
+Environment=CONSULTANCY_MCP_HOST=127.0.0.1
+Environment=CONSULTANCY_MCP_PORT=8765
+
+# DNS-rebinding protection. nginx forwards the public name as Host, which is
+# not a loopback address, so it must be named here or EVERY proxied request
+# answers 421 Misdirected Request while the process itself looks healthy.
+# Origins are only sent by browser-based clients; add one per client that needs it.
+Environment=CONSULTANCY_MCP_ALLOWED_HOSTS=console.nexxteducation.in,console.nexxteducation.in:443
+Environment=CONSULTANCY_MCP_ALLOWED_ORIGINS=https://console.nexxteducation.in
+
+# Add CONSULTANCY_MCP_READ_ONLY=1 above to serve a read-only deployment.
+ExecStart=/opt/consultancy/backend/venv/bin/python -m mcp_server --transport streamable-http
+Restart=always
+RestartSec=3
+
+# Hardening, matching consultancy-backend.service.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

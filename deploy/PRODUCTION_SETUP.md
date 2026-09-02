@@ -122,3 +122,47 @@ sudo systemctl enable --now consultancy-backend consultancy-frontend
 curl -s https://console.nexxteducation.in/api/ -o /dev/null -w "%{http_code}\n"
 curl -sI https://console.nexxteducation.in | head -5
 ```
+
+## 8. MCP server (optional, for AI clients)
+
+Lets Claude, ChatGPT, Cursor and friends work inside the CRM as the signed-in user. It is a
+client of the API like any other: no database access, and no credential of its own — each
+request carries the user's own key, created on the console's Profile page.
+
+```bash
+sudo cp deploy/consultancy-mcp.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now consultancy-mcp
+curl -s https://console.nexxteducation.in/mcp/health     # {"status":"ok","version":"1.0.0","read_only":false}
+```
+
+nginx already proxies `/mcp` to `127.0.0.1:8765` (see the config in section 6). The endpoint
+clients connect to is `https://console.nexxteducation.in/mcp`.
+
+### Variables
+
+All optional; the unit sets the ones a hosted deployment needs.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `CONSULTANCY_API_URL` | `http://127.0.0.1:8000/api/` | Which API to call. A trailing slash is added if missing. |
+| `CONSULTANCY_MCP_HOST` | `127.0.0.1` | Bind address. Keep it on the loopback and let nginx face the world. |
+| `CONSULTANCY_MCP_PORT` | `8765` | Bind port. |
+| `CONSULTANCY_MCP_ALLOWED_HOSTS` | *(empty)* | **Required behind a proxy.** Comma-separated `Host` header values to accept, e.g. `console.nexxteducation.in,console.nexxteducation.in:443`. Empty means loopback only, so every proxied request answers **421**. |
+| `CONSULTANCY_MCP_ALLOWED_ORIGINS` | *(empty)* | Comma-separated `Origin` values to accept. Only browser-based clients send one; a request without an Origin always passes, and an unlisted one answers 403. |
+| `CONSULTANCY_MCP_READ_ONLY` | `0` | `1` unregisters every write tool (171 tools become 81). |
+| `CONSULTANCY_MCP_MAX_DOWNLOAD_BYTES` | `5242880` | Cap on a document fetched through a tool. |
+| `CONSULTANCY_MCP_TIMEOUT_SECONDS` | `30` | HTTP timeout for calls to the API. |
+| `CONSULTANCY_MCP_TRANSPORT` | `stdio` | `streamable-http` for the hosted mode; the unit passes `--transport` instead. |
+| `CONSULTANCY_USERNAME` / `CONSULTANCY_PASSWORD` | *(unset)* | **Local mode only.** Log in with a password instead of a key. Needed for the `list_api_keys` and `revoke_api_key` tools, which the API refuses to key-authenticated callers on purpose. |
+| `CONSULTANCY_API_KEY` | *(unset)* | **Local (stdio) mode only.** In hosted mode there is no server-wide credential: the bearer on each request is the user's own key, and a request without one is refused with 401 before it reaches the protocol layer. |
+
+### Checks
+
+```bash
+systemctl status consultancy-mcp
+journalctl -u consultancy-mcp -n 50            # startup line: "N tools, read_only=..., api=..."
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://console.nexxteducation.in/mcp   # 401
+```
+
+A **421** from `/mcp` means `CONSULTANCY_MCP_ALLOWED_HOSTS` does not list the name the client
+used. A **401** without a bearer is correct. Client setup for every platform is in `docs/mcp/`.

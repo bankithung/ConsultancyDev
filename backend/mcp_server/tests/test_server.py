@@ -261,3 +261,63 @@ class ClientForTests(McpTestCase):
             run_api(lambda: 1 / 0)
         with self.assertRaises(ApiError):
             raise ApiError(500, 'boom')
+
+
+class TransportSecurityTests(QuietLogsMixin, SimpleTestCase):
+    """
+    DNS-rebinding protection, which decides whether the hosted deployment works
+    at all.
+
+    FastMCP turns host validation on by itself whenever it binds a loopback
+    address, and allows only loopback Host headers. Behind nginx the Host is
+    `console.nexxteducation.in`, so without CONSULTANCY_MCP_ALLOWED_HOSTS every
+    proxied request would answer 421 and the server would look dead while the
+    process was healthy.
+    """
+
+    INITIALIZE = {
+        'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+        'params': {'protocolVersion': '2025-06-18', 'capabilities': {},
+                   'clientInfo': {'name': 'test', 'version': '1'}},
+    }
+    HEADERS = {'Authorization': 'Bearer cdk_x', 'Accept': 'application/json, text/event-stream',
+               'Content-Type': 'application/json'}
+
+    def _client(self, **settings):
+        """One TestClient per app: the SDK's session manager runs once per instance."""
+        client = TestClient(create_http_app(Settings(transport='streamable-http', **settings)))
+        self.enterContext(client)
+        return client
+
+    def _post(self, client, host, **extra):
+        return client.post('/mcp', json=self.INITIALIZE, headers={**self.HEADERS, 'Host': host, **extra})
+
+    def test_a_configured_host_is_served_and_any_other_is_refused(self):
+        client = self._client(allowed_hosts=('console.nexxteducation.in', 'console.nexxteducation.in:443'))
+        allowed = self._post(client, 'console.nexxteducation.in')
+        self.assertEqual(allowed.status_code, 200, allowed.text)
+        self.assertEqual(allowed.json()['result']['serverInfo']['name'], 'consultancy-dev')
+        self.assertEqual(self._post(client, 'console.nexxteducation.in:443').status_code, 200)
+        refused = self._post(client, 'attacker.example.com')
+        self.assertEqual(refused.status_code, 421)
+
+    def test_loopback_still_works_when_nothing_is_configured(self):
+        """The default is the SDK's: local clients yes, everyone else no."""
+        client = self._client()
+        self.assertEqual(self._post(client, '127.0.0.1:8765').status_code, 200)
+        self.assertEqual(self._post(client, 'localhost:8765').status_code, 200)
+        self.assertEqual(self._post(client, 'console.nexxteducation.in').status_code, 421)
+
+    def test_an_origin_must_be_configured_before_a_browser_client_is_let_in(self):
+        """
+        A missing Origin is fine (that is every non-browser client), a
+        configured one passes, and an unknown one is refused with 403 —
+        a different answer from the Host check, so the operator can tell which
+        list needs the entry.
+        """
+        client = self._client(allowed_hosts=('console.nexxteducation.in',),
+                              allowed_origins=('https://claude.ai',))
+        host = 'console.nexxteducation.in'
+        self.assertEqual(self._post(client, host).status_code, 200)
+        self.assertEqual(self._post(client, host, Origin='https://claude.ai').status_code, 200)
+        self.assertEqual(self._post(client, host, Origin='https://attacker.example.com').status_code, 403)
