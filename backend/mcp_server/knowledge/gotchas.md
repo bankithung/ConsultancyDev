@@ -26,7 +26,7 @@ observed against the running backend, not inferred from the models.
 - Shared universities (company null) are writable by any manager in any tenant.
 - Transfers and approval requests can be patched or deleted within your scope, and neither
   destroy consults deleteRecords. Statuses stay read-only, so nothing can be self-approved that
-  way. Prefer the accept, reject, approve and reject tools.
+  way. Prefer the dedicated accept, reject and approve tools over a raw patch.
 - Any Django superuser is treated as a DEV_ADMIN, whatever their role column says.
 - Records created by a DEV_ADMIN through the scoped viewsets land with company and branch NULL
   and are then invisible to every tenant, including the one they were meant for.

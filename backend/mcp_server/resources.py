@@ -32,16 +32,17 @@ def read_topic(topic: str) -> str:
     """
     One knowledge file by name.
 
-    The separator and dot-segment checks run BEFORE the path is joined: a
-    topic of '../catalog' would otherwise resolve to a real file outside the
-    knowledge directory and `is_file()` would happily agree.
+    A topic name is one bare stem: no separator and no dot. That is checked
+    BEFORE the path is joined, because '../catalog' resolves to a real file
+    outside the knowledge directory and `is_file()` would happily agree. Both
+    a traversal attempt and an honest typo get the same answer — the list of
+    topics that do exist — since neither caller can do anything with more.
     """
-    if not topic or '/' in topic or '\\' in topic or '.' in topic:
-        raise KeyError(f'Unknown knowledge topic {topic!r}. Topics: {", ".join(list_topics())}')
-    path = KNOWLEDGE_DIR / f'{topic}.md'
-    if not path.is_file():
-        raise KeyError(f'Unknown knowledge topic {topic!r}. Topics: {", ".join(list_topics())}')
-    return path.read_text(encoding='utf-8')
+    if topic and not ({'/', '\\', '.'} & set(topic)):
+        path = KNOWLEDGE_DIR / f'{topic}.md'
+        if path.is_file():
+            return path.read_text(encoding='utf-8')
+    raise KeyError(f'Unknown knowledge topic {topic!r}. Topics: {", ".join(list_topics())}')
 
 
 def register_resources(mcp: FastMCP, state: ServerState) -> None:
