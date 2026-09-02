@@ -209,19 +209,22 @@ class WorkflowToolTests(McpTestCase):
     def test_record_payment_validates_method_metadata(self):
         reg = self.call('convert_enquiry_to_registration', self.mgr_k, enquiry_id=self.enq_k2.pk, registration_fee='1000')
         text = self.call_raises('record_payment', self.mgr_k, amount='500', method='UPI', registration=reg['id'], metadata={'cheque_no': '1'})
-        self.assertIn('upi_transaction_id', text)
+        self.assertIn('upi_id', text)
         pay = self.call('record_payment', self.mgr_k, amount='500', method='UPI', registration=reg['id'],
-                        metadata={'upi_transaction_id': 'T123'})
+                        metadata={'upi_id': 'T123'})
         self.assertEqual(pay['status'], 'Success')
         self.assertEqual(pay['student_name'], 'kohima-two')
-        self.assertEqual(pay['metadata']['upi_transaction_id'], 'T123')
+        self.assertEqual(pay['metadata']['upi_id'], 'T123')
 
     def test_record_payment_rejects_a_metadata_key_the_method_does_not_use(self):
         reg = self.call('convert_enquiry_to_registration', self.mgr_k, enquiry_id=self.enq_k2.pk, registration_fee='1000')
         text = self.call_raises('record_payment', self.mgr_k, amount='500', method='Cheque', registration=reg['id'],
-                                metadata={'cheque_no': '7', 'bank_name': 'SBI', 'upi_transaction_id': 'T1'})
-        self.assertIn('upi_transaction_id', text)
+                                metadata={'cheque_no': '7', 'bank': 'SBI', 'upi_id': 'T1'})
+        self.assertIn('upi_id', text)
         self.assertEqual(Payment.objects.filter(registration_id=reg['id']).count(), 1)
+        pay = self.call('record_payment', self.mgr_k, amount='500', method='Cheque', registration=reg['id'],
+                        metadata={'cheque_no': '7', 'bank': 'SBI'})
+        self.assertEqual(pay['metadata'], {'cheque_no': '7', 'bank': 'SBI'})
 
     def test_record_payment_cash_takes_no_metadata(self):
         reg = self.call('convert_enquiry_to_registration', self.mgr_k, enquiry_id=self.enq_k2.pk, registration_fee='1000')
@@ -478,7 +481,16 @@ class RegistrationTests(McpTestCase):
                 self.assertTrue((tools[name].description or '').strip())
                 self.assertIsNotNone(tools[name].outputSchema, f'{name} has no structured output')
 
-    def test_payment_metadata_table_covers_the_methods_the_console_offers(self):
+    def test_payment_metadata_table_matches_the_frontend_interface(self):
+        """
+        The five keys are PaymentMetadata in
+        consultancy-dev/components/common/payments.ts. Nothing validates
+        `Payment.metadata` server-side, so the console reading them back is the
+        only thing that makes a key mean anything: a spelling of our own would
+        store fine and render as no method detail at all.
+        """
         self.assertEqual(set(PAYMENT_METADATA_KEYS), {'Cash', 'Cheque', 'UPI', 'Card'})
         self.assertEqual(PAYMENT_METADATA_KEYS['Cash'], ())
-        self.assertEqual(PAYMENT_METADATA_KEYS['UPI'], ('upi_transaction_id',))
+        self.assertEqual(PAYMENT_METADATA_KEYS['Cheque'], ('cheque_no', 'bank'))
+        self.assertEqual(PAYMENT_METADATA_KEYS['UPI'], ('upi_id',))
+        self.assertEqual(PAYMENT_METADATA_KEYS['Card'], ('card_last4', 'card_network'))

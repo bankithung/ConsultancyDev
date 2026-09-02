@@ -78,10 +78,19 @@ ENQUIRY_TO_REGISTRATION: tuple[tuple[str, str], ...] = (
 # refused, so a cheque number cannot be filed under a UPI payment where no
 # screen would ever show it. A method absent from this table (Bank Transfer,
 # say) has no agreed shape, so its metadata is passed through unchecked.
+#
+# THE NAMES ARE THE FRONTEND'S, NOT THIS MODULE'S. `Payment.metadata` is an
+# opaque JSONField with no server-side validation, so the only thing that makes
+# a key mean something is the console reading it back: PaymentMetadata in
+# consultancy-dev/components/common/payments.ts, and METADATA_LABELS beside it,
+# which renders exactly these five. A payment written here under a different
+# spelling would store fine and then show no method detail on the screen a
+# person looks at, and a payment written there could not be echoed back through
+# record_payment.
 PAYMENT_METADATA_KEYS: dict[str, tuple[str, ...]] = {
     'Cash': (),
-    'Cheque': ('cheque_no', 'bank_name'),
-    'UPI': ('upi_transaction_id',),
+    'Cheque': ('cheque_no', 'bank'),
+    'UPI': ('upi_id',),
     'Card': ('card_last4', 'card_network'),
 }
 
@@ -689,8 +698,9 @@ def register_workflow_tools(mcp: FastMCP, state: ServerState) -> None:
         'Record a payment (POST /api/payments/). Link it to a registration and/or an enrollment, and to an '
         'installment when settling one. type: Registration, Enrollment or Other. status: Pending, Success, '
         'Failed or Refunded — only Success counts as revenue. Method-specific detail goes in `metadata`, '
-        'which must hold exactly the keys for the method: Cheque cheque_no and bank_name, UPI '
-        'upi_transaction_id, Card card_last4 and card_network, Cash none. student_name is read from the '
+        'which must hold exactly the keys for the method: Cheque cheque_no and bank, UPI upi_id, Card '
+        'card_last4 and card_network, Cash none. Those are the five keys the web console stores and '
+        'renders, so a payment recorded here shows its method detail there. student_name is read from the '
         'linked registration or enrollment when omitted. Do not use this for a registration fee — creating '
         'the registration already books it.'
     )
