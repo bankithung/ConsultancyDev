@@ -99,6 +99,8 @@ ACTION_OVERLAY = {
         'tool_name': 'set_user_active',
         'description': 'Activate or deactivate a staff account (is_active_employee). Needs manageUsers. Deactivation revokes all of that user\'s tokens and API keys. You cannot target yourself.',
         'body': {'is_active': 'boolean, required'}, 'response': 'User object',
+        # Deactivation revokes every token and API key the target holds.
+        'destructive': True, 'idempotent': True,
     },
     ('users', 'counselors'): {
         'tool_name': 'list_counselors',
@@ -143,11 +145,11 @@ ACTION_OVERLAY = {
     },
     ('notifications', 'mark_read'): {
         'tool_name': 'mark_notification_read', 'description': 'Mark one notification read.',
-        'body': {}, 'response': 'Notification object',
+        'body': {}, 'response': 'Notification object', 'idempotent': True,
     },
     ('notifications', 'mark_all_read'): {
         'tool_name': 'mark_all_notifications_read', 'description': 'Mark every unread notification read.',
-        'body': {}, 'response': '{"updated": n}',
+        'body': {}, 'response': '{"updated": n}', 'idempotent': True,
     },
     ('notifications', 'unread_count'): {
         'tool_name': 'unread_notification_count', 'description': 'Count of unread notifications.',
@@ -160,7 +162,7 @@ ACTION_OVERLAY = {
     },
     ('transfers', 'reject'): {
         'tool_name': 'reject_transfer', 'description': 'Reject a PENDING transfer addressed to the caller.',
-        'body': {}, 'response': 'RecordTransfer object',
+        'body': {}, 'response': 'RecordTransfer object', 'destructive': True,
     },
     ('transfers', 'inbox'): {
         'tool_name': 'transfer_inbox', 'description': 'PENDING transfers addressed to the caller. Paginated.',
@@ -177,7 +179,7 @@ ACTION_OVERLAY = {
     },
     ('signup-requests', 'reject'): {
         'tool_name': 'reject_signup_request', 'description': 'DEV_ADMIN. Reject a pending signup request.',
-        'body': {'reason': 'string'}, 'response': '{"status": "rejected"}',
+        'body': {'reason': 'string'}, 'response': '{"status": "rejected"}', 'destructive': True,
     },
     ('approval-requests', 'pending_count'): {
         'tool_name': 'approval_pending_count', 'description': 'Count of approval requests in the caller\'s queue.',
@@ -194,12 +196,12 @@ ACTION_OVERLAY = {
     },
     ('approval-requests', 'reject'): {
         'tool_name': 'reject_approval_request', 'description': 'Needs reviewApprovals.',
-        'body': {'note': 'string, optional'}, 'response': 'ApprovalRequest object',
+        'body': {'note': 'string, optional'}, 'response': 'ApprovalRequest object', 'destructive': True,
     },
     ('api-keys', 'revoke'): {
         'tool_name': 'revoke_api_key',
         'description': 'Revoke a personal API key. Not callable when authenticated with an API key.',
-        'body': {}, 'response': 'ApiKey object',
+        'body': {}, 'response': 'ApiKey object', 'destructive': True, 'idempotent': True,
     },
 }
 
@@ -287,6 +289,9 @@ RESOURCE_NOTES = {
         'The 201 response is the key object plus a one-time plaintext `key`.',
         'There is no detail route and no list/retrieve by id: only GET api-keys/, POST api-keys/ and '
         'POST api-keys/{id}/revoke/. GET accepts ?user=<id> for company admins (own company) and dev admins.',
+        'Keys are created on the Profile page or with password (JWT) credentials; every api-keys endpoint '
+        'answers 403 to a caller authenticated with an API key, so list_api_keys/revoke_api_key work only '
+        'under password credentials.',
     ],
 }
 
@@ -463,8 +468,17 @@ def _methods(viewset_class):
 # 409 every time. A create_installment tool would be a permanent dead end, so
 # the verb is switched off here rather than papered over downstream.
 # Schedules are built by create_enrollment's installments_count.
+#
+# api-keys/ routes POST too, and it is unusable from a tool for two separate
+# reasons. The catalog probes ApiKeySerializer, whose read_only_fields ARE its
+# fields, so a generated create would strip the whole payload and POST {} at
+# ApiKeyCreateSerializer, which requires `name`. And ApiKeyViewSet.initial()
+# answers 403 to every api-keys call made with API-key credentials — which is
+# how an MCP client normally authenticates — so a leaked key cannot mint its
+# own replacement.
 VERB_OVERRIDES = {
     'installments': {'create': False},
+    'api-keys': {'create': False},
 }
 
 
@@ -530,6 +544,11 @@ def _actions(prefix, viewset_class):
             'query': overlay.get('query', {}),
             'response': overlay.get('response', ''),
             'skip_generated': overlay.get('skip_generated', False),
+            # Always present, so a consumer annotating a tool reads what the
+            # action DOES rather than guessing from words in its name:
+            # set_user_active revokes every token and key the target holds.
+            'destructive': overlay.get('destructive', False),
+            'idempotent': overlay.get('idempotent', False),
         })
     out.sort(key=lambda a: a['name'])
     return out

@@ -44,7 +44,10 @@ UNIVERSAL_PARAMS = {'page', 'page_size', 'search', 'ordering'}
 
 MAX_PAGE_SIZE = 200
 
-# Words in a tool name that mean the action takes something away.
+# Fallback only, for an action the catalog has not classified. A name is weak
+# evidence: set_user_active reads as a harmless toggle and revokes every token
+# and API key the target holds, which is why `destructive` is declared in the
+# catalog's ACTION_OVERLAY and read first.
 DESTRUCTIVE_WORDS = ('reject', 'revoke', 'reset', 'delete')
 
 
@@ -307,9 +310,15 @@ def _register_action(mcp: FastMCP, state: ServerState, action: dict, read_only: 
         description += f" query: {json.dumps(action['query'])}."
     if action['response']:
         description += f" Returns: {action['response']}."
+    # The catalog classifies what an action does; the name is only the fallback
+    # for one it has not classified. idempotentHint is left unset on a read,
+    # where the spec says it means nothing.
+    destructive = (action['destructive'] if 'destructive' in action
+                   else any(w in tool_name for w in DESTRUCTIVE_WORDS))
     _add(mcp, fn, tool_name, description,
          ToolAnnotations(title=tool_name.replace('_', ' '), readOnlyHint=not is_write,
-                         destructiveHint=any(w in tool_name for w in DESTRUCTIVE_WORDS)))
+                         destructiveHint=destructive,
+                         idempotentHint=action.get('idempotent') if is_write else None))
 
 
 def _detail_path(action: dict, id_value: Any) -> str:

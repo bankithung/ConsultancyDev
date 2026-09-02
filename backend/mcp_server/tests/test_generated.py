@@ -101,9 +101,12 @@ class GeneratedRegistrationTests(SimpleTestCase):
 
     def test_routes_the_viewsets_cannot_serve_get_no_tool(self):
         names = {t.name for t in _generated_server()._tool_manager.list_tools()}
-        # api-keys/ lists and creates but has no detail route.
+        # api-keys/ lists but has no detail route, and its POST is unusable
+        # from a tool: the probed serializer is read-only throughout, and the
+        # viewset refuses any api-keys call made with API-key credentials.
         self.assertIn('list_api_keys', names)
         self.assertNotIn('get_api_key', names)
+        self.assertNotIn('create_api_key', names)
         self.assertNotIn('delete_api_key', names)
         # installments/ routes POST, but `enrollment` is read-only so it 409s.
         self.assertIn('update_installment', names)
@@ -128,6 +131,20 @@ class GeneratedRegistrationTests(SimpleTestCase):
         self.assertIs(by_name['update_enquiry'].annotations.idempotentHint, True)
         self.assertIs(by_name['revoke_api_key'].annotations.destructiveHint, True)
         self.assertIs(by_name['transfer_inbox'].annotations.readOnlyHint, True)
+
+    def test_action_annotations_come_from_the_catalog_not_the_name(self):
+        """
+        set_user_active reads as a harmless toggle and revokes every token and
+        API key the target holds, so the catalog declares what an action does
+        and the name heuristic is only the fallback.
+        """
+        by_name = {t.name: t for t in _generated_server()._tool_manager.list_tools()}
+        self.assertIs(by_name['set_user_active'].annotations.destructiveHint, True)
+        self.assertIs(by_name['set_user_active'].annotations.idempotentHint, True)
+        self.assertIs(by_name['reorder_tasks'].annotations.destructiveHint, False)
+        self.assertIs(by_name['mark_notification_read'].annotations.idempotentHint, True)
+        self.assertIs(by_name['accept_transfer'].annotations.destructiveHint, False)
+        self.assertIs(by_name['reject_transfer'].annotations.destructiveHint, True)
 
     def test_schemas_expose_the_documented_parameters_and_nothing_else(self):
         """

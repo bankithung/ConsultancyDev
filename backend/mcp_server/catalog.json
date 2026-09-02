@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-02T12:58:46.413424+00:00",
+  "generated_at": "2026-09-02T13:31:01.186325+00:00",
   "resources": [
     {
       "prefix": "agents",
@@ -285,7 +285,7 @@
       "verbs": {
         "list": true,
         "retrieve": false,
-        "create": true,
+        "create": false,
         "update": false,
         "partial_update": false,
         "destroy": false
@@ -441,13 +441,16 @@
           "body": {},
           "query": {},
           "response": "ApiKey object",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": true,
+          "idempotent": true
         }
       ],
       "notes": [
         "Keys are created only for the caller; the plaintext is returned once.",
         "POST body is {\"name\": \"string, required, max 80\", \"expires_at\": \"ISO datetime, optional, must be in the future\"}. The 201 response is the key object plus a one-time plaintext `key`.",
-        "There is no detail route and no list/retrieve by id: only GET api-keys/, POST api-keys/ and POST api-keys/{id}/revoke/. GET accepts ?user=<id> for company admins (own company) and dev admins."
+        "There is no detail route and no list/retrieve by id: only GET api-keys/, POST api-keys/ and POST api-keys/{id}/revoke/. GET accepts ?user=<id> for company admins (own company) and dev admins.",
+        "Keys are created on the Profile page or with password (JWT) credentials; every api-keys endpoint answers 403 to a caller authenticated with an API key, so list_api_keys/revoke_api_key work only under password credentials."
       ]
     },
     {
@@ -819,7 +822,9 @@
             "year": "integer, required"
           },
           "response": "[Appointment]",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         }
       ],
       "notes": []
@@ -1111,7 +1116,9 @@
           },
           "query": {},
           "response": "ApprovalRequest object",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         },
         {
           "name": "my_requests",
@@ -1123,7 +1130,9 @@
           "body": {},
           "query": {},
           "response": "paginated ApprovalRequest list",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         },
         {
           "name": "pending_count",
@@ -1135,7 +1144,9 @@
           "body": {},
           "query": {},
           "response": "{\"count\": n}",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         },
         {
           "name": "reject",
@@ -1149,7 +1160,9 @@
           },
           "query": {},
           "response": "ApprovalRequest object",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": true,
+          "idempotent": false
         }
       ],
       "notes": [
@@ -2179,7 +2192,9 @@
           "body": {},
           "query": {},
           "response": "binary file",
-          "skip_generated": true
+          "skip_generated": true,
+          "destructive": false,
+          "idempotent": false
         },
         {
           "name": "expiring_soon",
@@ -2193,7 +2208,9 @@
             "days": "integer, default 30"
           },
           "response": "paginated Document list",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         }
       ],
       "notes": [
@@ -4306,7 +4323,9 @@
           "body": {},
           "query": {},
           "response": "{\"updated\": n}",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": true
         },
         {
           "name": "mark_read",
@@ -4318,7 +4337,9 @@
           "body": {},
           "query": {},
           "response": "Notification object",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": true
         },
         {
           "name": "unread_count",
@@ -4330,7 +4351,9 @@
           "body": {},
           "query": {},
           "response": "{\"count\": n}",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         }
       ],
       "notes": [
@@ -4704,7 +4727,9 @@
           "body": {},
           "query": {},
           "response": "{\"totalRevenue\", \"thisMonthRevenue\", \"pendingAmount\", \"transactionCount\"}",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         }
       ],
       "notes": [
@@ -6258,7 +6283,9 @@
           "body": {},
           "query": {},
           "response": "{\"status\": \"approved\", \"company\": id, \"user\": id}",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         },
         {
           "name": "reject",
@@ -6272,7 +6299,9 @@
           },
           "query": {},
           "response": "{\"status\": \"rejected\"}",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": true,
+          "idempotent": false
         }
       ],
       "notes": [
@@ -6625,7 +6654,9 @@
           },
           "query": {},
           "response": "{\"returned\": n, \"requested\": m, \"ids\": [...]}",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         }
       ],
       "notes": [
@@ -7067,7 +7098,9 @@
           "body": {},
           "query": {},
           "response": "Subscription object",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         }
       ],
       "notes": []
@@ -7386,7 +7419,9 @@
           },
           "query": {},
           "response": "{\"reordered\": n, \"requested\": m}",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         }
       ],
       "notes": []
@@ -7944,7 +7979,9 @@
           "body": {},
           "query": {},
           "response": "RecordTransfer object",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         },
         {
           "name": "inbox",
@@ -7956,7 +7993,9 @@
           "body": {},
           "query": {},
           "response": "paginated RecordTransfer list",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         },
         {
           "name": "outbox",
@@ -7968,7 +8007,9 @@
           "body": {},
           "query": {},
           "response": "paginated RecordTransfer list",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         },
         {
           "name": "reject",
@@ -7980,7 +8021,9 @@
           "body": {},
           "query": {},
           "response": "RecordTransfer object",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": true,
+          "idempotent": false
         }
       ],
       "notes": [
@@ -8493,7 +8536,9 @@
           },
           "query": {},
           "response": "{\"status\": \"Password updated.\"}",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         },
         {
           "name": "counselors",
@@ -8505,7 +8550,9 @@
           "body": {},
           "query": {},
           "response": "[{id, name, email, avatar, branch, totalEnquiries, converted, registrations, enrollments, conversionRate}]",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         },
         {
           "name": "me",
@@ -8517,7 +8564,9 @@
           "body": {},
           "query": {},
           "response": "User object",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
         },
         {
           "name": "set_active",
@@ -8531,7 +8580,9 @@
           },
           "query": {},
           "response": "User object",
-          "skip_generated": false
+          "skip_generated": false,
+          "destructive": true,
+          "idempotent": true
         }
       ],
       "notes": [

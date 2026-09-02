@@ -80,9 +80,10 @@ class CatalogBuildTests(SimpleTestCase):
     def test_verbs_report_the_handlers_each_viewset_defines(self):
         # `methods` cannot say "list but no retrieve": api-keys/ has no detail
         # route, so a generator reading GET alone would emit a get_api_key tool
-        # pointing at a URL that does not resolve.
+        # pointing at a URL that does not resolve. `create` is routed here but
+        # switched off by VERB_OVERRIDES (see test_api_keys_cannot_be_created).
         self.assertEqual(self.by_prefix['api-keys']['verbs'], {
-            'list': True, 'retrieve': False, 'create': True,
+            'list': True, 'retrieve': False, 'create': False,
             'update': False, 'partial_update': False, 'destroy': False,
         })
         # A full ModelViewSet defines all six.
@@ -117,6 +118,39 @@ class CatalogBuildTests(SimpleTestCase):
         notes = ' '.join(installments['notes'])
         self.assertIn('create_enrollment', notes)
         self.assertIn('installments_count', notes)
+
+    def test_api_keys_cannot_be_created(self):
+        # The catalog probes ApiKeySerializer, whose read_only_fields are its
+        # fields, so a generated create would strip the whole payload and POST
+        # {} against ApiKeyCreateSerializer, which requires `name`. And
+        # ApiKeyViewSet.initial() answers 403 to every api-keys call made with
+        # API-key credentials, which is how the MCP server usually authenticates.
+        keys = self.by_prefix['api-keys']
+        self.assertFalse(keys['verbs']['create'])
+        self.assertTrue(keys['verbs']['list'])
+        self.assertTrue(all(f['read_only'] for f in keys['fields']),
+                        'the override exists because the probed serializer is read-only throughout')
+        notes = ' '.join(keys['notes'])
+        self.assertIn('403', notes)
+        self.assertIn('password', notes)
+        self.assertIn('revoke_api_key', notes)
+
+    def test_actions_declare_destructiveness_and_idempotence(self):
+        # A tool annotation must not be guessed from the tool's name:
+        # set_user_active revokes every token and key the target holds.
+        actions = {(r['prefix'], a['name']): a for r in self.catalog['resources'] for a in r['actions']}
+        for key, action in actions.items():
+            with self.subTest(action=key):
+                self.assertIsInstance(action['destructive'], bool)
+                self.assertIsInstance(action['idempotent'], bool)
+        for key in (('users', 'set_active'), ('api-keys', 'revoke'), ('transfers', 'reject'),
+                    ('approval-requests', 'reject'), ('signup-requests', 'reject')):
+            self.assertTrue(actions[key]['destructive'], key)
+        for key in (('users', 'set_active'), ('api-keys', 'revoke'),
+                    ('notifications', 'mark_read'), ('notifications', 'mark_all_read')):
+            self.assertTrue(actions[key]['idempotent'], key)
+        for key in (('tasks', 'reorder'), ('transfers', 'accept'), ('users', 'me')):
+            self.assertFalse(actions[key]['destructive'], key)
 
     def test_companies_notes_record_the_admin_only_is_active(self):
         # The catalog probes as an anonymous caller, so CompanyViewSet hands it
@@ -185,9 +219,10 @@ class CatalogBuildTests(SimpleTestCase):
     def test_markdown_omits_tools_the_viewset_cannot_route(self):
         md = mcp_catalog.render_tools_markdown(self.catalog)
         self.assertIn('| `list_api_keys` |', md)
-        self.assertIn('| `create_api_key` |', md)
-        # api-keys/ has no detail route, so there is no such tool to advertise.
+        # api-keys/ has no detail route, so there is no such tool to advertise,
+        # and POST is unusable from a tool (see test_api_keys_cannot_be_created).
         self.assertNotIn('get_api_key', md)
+        self.assertNotIn('create_api_key', md)
         # notifications/ is read-only: reads yes, writes no.
         self.assertIn('| `get_notification` |', md)
         self.assertNotIn('create_notification', md)
