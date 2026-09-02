@@ -132,11 +132,18 @@ request carries the user's own key, created on the console's Profile page.
 ```bash
 sudo cp deploy/consultancy-mcp.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now consultancy-mcp
+
+# nginx routes /mcp to the unit, and an existing deployment's config predates
+# that block: redeploy section 6's config first, or /mcp answers 404.
+sudo cp deploy/nginx.console.nexxteducation.in.conf /etc/nginx/sites-available/console.nexxteducation.in
+sudo nginx -t && sudo systemctl reload nginx
+
 curl -s https://console.nexxteducation.in/mcp/health     # {"status":"ok","version":"1.0.0","read_only":false}
 ```
 
-nginx already proxies `/mcp` to `127.0.0.1:8765` (see the config in section 6). The endpoint
-clients connect to is `https://console.nexxteducation.in/mcp`.
+The `/mcp` proxy to `127.0.0.1:8765` lives in the config in section 6, so a first-time install
+that followed section 6 already has it and only needs the reload above. The endpoint clients
+connect to is `https://console.nexxteducation.in/mcp`.
 
 ### Variables
 
