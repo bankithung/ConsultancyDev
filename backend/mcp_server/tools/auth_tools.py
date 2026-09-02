@@ -37,6 +37,29 @@ APPROVAL_NOTE = ('A role without deleteRecords does not get a hard refusal on ev
                  'approval request instead. Use create_approval_request with action="DELETE".')
 
 
+def _both_gates_note(catalog: Catalog, resource: dict, write_capability: str, delete_capability: str) -> str:
+    """
+    Spell out that a delete passes two gates, and name the narrower one.
+
+    `floor` and `reason` on the answer belong to the delete capability, so
+    without this the narrower gate — the one actually producing the 403 — would
+    appear nowhere.
+    """
+    defaults = catalog.roles['defaults']
+    write_roles = defaults.get(write_capability, [])
+    note = (f'Deleting one {resource["singular"]} clears TWO gates: the resource write capability '
+            f'{write_capability}, because DELETE is not a safe method and the viewset checks it before '
+            f'anything else, and then {delete_capability}. allowed_by_default is the intersection of the '
+            f'two, and `capability` names both.')
+    if set(write_roles) < set(defaults.get(delete_capability, [])):
+        note += (f' {write_capability} is the narrower gate here: by default only '
+                 f'{", ".join(write_roles) or "no role"} holds it.')
+        protected = catalog.roles['protected'].get(write_capability, {})
+        if protected.get('floor'):
+            note += f' It cannot be granted below {protected["floor"]}. {protected["reason"]}'
+    return note
+
+
 def check_changes(catalog: Catalog, changes: list[dict[str, Any]]) -> None:
     """
     Reject a malformed cell before the API sees it, naming the values that work.
@@ -103,7 +126,7 @@ def register_auth_tools(mcp: FastMCP, state: ServerState) -> None:
         return run_api(lambda: client.get('role-permissions/mine/'))
 
     def explain_permission(ctx: Context, action: str, resource: str, role: str | None = None) -> dict[str, Any]:
-        """Explain whether `role` (default: the caller's) may `action` (read, write, create, update or delete) a `resource` (a catalog name such as enquiries or commissions): which capability governs it, the role floor below which it cannot be delegated, and why that floor exists. Answered from the committed catalog, so it describes the SHIPPED DEFAULT — a company override can widen or narrow it, and my_capabilities is the live answer. Reads the API only to discover the caller's role when `role` is omitted."""
+        """Explain whether `role` (default: the caller's) may `action` (read, write, create, update or delete) a `resource` (a catalog name such as enquiries or commissions): which capability governs it, the role floor below which it cannot be delegated, and why that floor exists. A delete clears the resource's write gate BEFORE the delete gate, so for action=delete `capability` names both joined with ' + ' (for example 'manageCommissions + deleteRecords'), allowed_by_default is the intersection, `floor` and `reason` describe the delete gate, and the notes name whichever gate is narrower. Answered from the committed catalog, so it describes the SHIPPED DEFAULT — a company override can widen or narrow it, and my_capabilities is the live answer. Reads the API only to discover the caller's role when `role` is omitted."""
         action = (action or '').lower()
         if action not in ACTIONS:
             raise ToolError(f'action must be one of {", ".join(ACTIONS)}; got {action!r}.')
@@ -121,18 +144,43 @@ def register_auth_tools(mcp: FastMCP, state: ServerState) -> None:
         if role not in catalog.roles['rank']:
             raise ToolError(f'Unknown role {role}. Roles: {", ".join(catalog.roles["rank"])}.')
 
+        delete_capability = r['delete_requires_capability']
+        # `governing` is the capability whose floor and reason are reported. It
+        # can differ from `capability`, which NAMES every gate the action passes.
+        both_gates = None
         if action == 'read':
-            capability, roles = r['read_capability'], r['read_roles']
-        elif action == 'delete' and r['delete_requires_capability']:
-            capability = r['delete_requires_capability']
-            roles = catalog.roles['defaults'].get(capability, [])
+            capability = governing = r['read_capability']
+            roles = r['read_roles']
+        elif action == 'delete' and delete_capability:
+            # A delete clears TWO gates. DELETE is not a safe method, so the
+            # viewset's write permission class runs first and the delete
+            # capability is only consulted after it passes: deleting a
+            # commission needs manageCommissions AND deleteRecords. Reporting
+            # the delete gate alone said a head manager may delete a commission,
+            # and the API answers 403.
+            delete_roles = catalog.roles['defaults'].get(delete_capability, [])
+            roles = [name for name in r['write_roles'] if name in delete_roles]
+            governing = delete_capability
+            write_capability = r['write_capability']
+            if write_capability and write_capability != delete_capability:
+                capability = f'{write_capability} + {delete_capability}'
+                both_gates = _both_gates_note(catalog, r, write_capability, delete_capability)
+            else:
+                capability = delete_capability
         else:
-            capability, roles = r['write_capability'], r['write_roles']
+            capability = governing = r['write_capability']
+            roles = r['write_roles']
 
-        protected = catalog.roles['protected'].get(capability or '', {})
+        protected = catalog.roles['protected'].get(governing or '', {})
         notes = list(r['notes'])
         notes.append(READ_SCOPE_NOTE if action == 'read' else WRITE_SCOPE_NOTE)
-        if action == 'delete' and capability == 'deleteRecords':
+        if both_gates:
+            notes.append(both_gates)
+        # Only where the approval queue actually accepts the entity: its types
+        # are a fixed list, and commissions, agents and refunds are not on it,
+        # so offering that route there would send the caller nowhere.
+        if (action == 'delete' and governing == 'deleteRecords'
+                and r['entity_type'] in catalog.approvals['entity_types']):
             notes.append(APPROVAL_NOTE)
 
         return {

@@ -12,7 +12,7 @@ from decimal import Decimal
 from django.utils import timezone
 from mcp.shared.memory import create_connected_server_and_client_session
 
-from core.models import Payment
+from core.models import Agent, Commission, Payment
 from mcp_server.config import Settings
 from mcp_server.server import build_server
 
@@ -191,6 +191,59 @@ class ExplainPermissionTests(McpTestCase):
         self.assertEqual(answer['floor'], 'BRANCH_MANAGER')
         self.assertIn('audit trail', answer['reason'])
         self.assertIn('create_approval_request', ' '.join(answer['notes']))
+
+    def test_a_delete_clears_the_write_gate_as_well_as_the_delete_gate(self):
+        """
+        DELETE is not a safe method, so a viewset's write permission class runs
+        before `deleteRecords` is ever consulted. `commissions` and `agents` are
+        gated on `manageCommissions`, which by default stops at company admin —
+        a head manager holds `deleteRecords` and is still refused.
+        """
+        for resource in ('commissions', 'agents'):
+            with self.subTest(resource=resource):
+                head = self.call('explain_permission', self.emp_k1, action='delete', resource=resource,
+                                 role='HEAD_MANAGER')
+                self.assertFalse(head['allowed_by_default'])
+                self.assertIn('manageCommissions', head['capability'])
+                self.assertIn('deleteRecords', head['capability'])
+                self.assertEqual(head['floor'], 'BRANCH_MANAGER')
+                self.assertTrue(any('manageCommissions' in note and 'narrower' in note for note in head['notes']),
+                                f'notes must name the narrower gate: {head["notes"]}')
+
+                for role in ('BRANCH_MANAGER', 'EMPLOYEE'):
+                    self.assertFalse(
+                        self.call('explain_permission', self.emp_k1, action='delete', resource=resource,
+                                  role=role)['allowed_by_default'])
+                self.assertTrue(
+                    self.call('explain_permission', self.emp_k1, action='delete', resource=resource,
+                              role='COMPANY_ADMIN')['allowed_by_default'])
+
+    def test_the_delete_answer_matches_what_the_api_does(self):
+        """The claim above, checked against the viewset rather than restated."""
+        agent = Agent.objects.create(company=self.company, branch=self.head_office,
+                                     created_by=self.admin, owner=self.admin, name='Referrer')
+        commission = Commission.objects.create(company=self.company, branch=self.head_office,
+                                               created_by=self.admin, owner=self.admin, agent=agent,
+                                               commission_amount=Decimal('500.00'))
+        self.assertTrue(self.call('my_capabilities', self.head)['capabilities'].count('deleteRecords'),
+                        'the head manager must hold deleteRecords for this to prove anything')
+        self.assertIn('403', self.call_raises('delete_commission', self.head, id=commission.pk, confirm=True))
+        self.assertEqual(self.call('delete_commission', self.admin, id=commission.pk, confirm=True)['deleted'],
+                         commission.pk)
+
+    def test_a_delete_with_no_separate_write_gate_reports_one_capability(self):
+        answer = self.call('explain_permission', self.emp_k1, action='delete', resource='enquiries',
+                           role='BRANCH_MANAGER')
+        self.assertEqual(answer['capability'], 'deleteRecords')
+        self.assertTrue(answer['allowed_by_default'])
+
+    def test_the_approval_route_is_only_offered_where_it_exists(self):
+        """`create_approval_request` takes a fixed list of entity types; commissions is not one of them."""
+        enquiries = self.call('explain_permission', self.emp_k1, action='delete', resource='enquiries')
+        self.assertIn('create_approval_request', ' '.join(enquiries['notes']))
+        commissions = self.call('explain_permission', self.emp_k1, action='delete', resource='commissions',
+                                role='HEAD_MANAGER')
+        self.assertNotIn('create_approval_request', ' '.join(commissions['notes']))
 
     def test_read_and_write_are_governed_by_different_capabilities(self):
         write = self.call('explain_permission', self.emp_k1, action='write', resource='commissions',
