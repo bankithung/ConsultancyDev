@@ -4,17 +4,20 @@ viewsets: what the generator emits, what it refuses to send, and what each
 role actually sees.
 """
 
+from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
-from core.models import ApiKey, Enquiry, Task
+from core.models import ApiKey, Enquiry, Role, Task
 from mcp_server.config import Settings
 from mcp_server.server import ServerState
 from mcp_server.testing import DjangoTestTransport
 from mcp_server.tools.generated import register_generated_tools, validate_payload
 
 from .base import CATALOG, McpTestCase
+
+User = get_user_model()
 
 
 def _expected_names(catalog, read_only=False):
@@ -330,3 +333,128 @@ class GeneratedActionTests(McpTestCase):
         key, _ = ApiKey.issue(self.admin, 'other')
         text = self.call_raises('revoke_api_key', self.admin, id=key.pk)
         self.assertIn('403', text)
+
+
+class CallerDependentSerializerTests(McpTestCase):
+    """
+    users/ and companies/ pick their serializer by WHO is asking, so the
+    catalog records the ADMIN shape (core.mcp_catalog.FIELD_OVERRIDES) and lets
+    the API judge the caller. These tests pin both halves: the writes an admin
+    can now make, and what the API actually answers when someone else tries.
+
+    Recording the narrow anonymous shape instead did not merely under-describe
+    the API. validate_payload is a hard client-side gate, so no role or branch
+    change was possible through any tool, and create_user dropped `password`
+    as an unknown field and then succeeded without it.
+    """
+
+    NEW_PASSWORD = 'Hired!2026xyz'
+
+    def test_create_user_with_password_role_and_branch_makes_a_usable_account(self):
+        created = self.call('create_user', self.admin, data={
+            'username': 'newhire', 'email': 'newhire@example.com', 'first_name': 'New',
+            'role': 'BRANCH_MANAGER', 'branch': self.kohima.pk, 'password': self.NEW_PASSWORD,
+        })
+        self.assertEqual(created['role'], 'BRANCH_MANAGER')
+        self.assertEqual(created['branch'], self.kohima.pk)
+        self.assertNotIn('password', created, 'the field is write-only')
+
+        # The password has to WORK, not merely be accepted: the defect this
+        # replaces was an account the API reported as created and nobody could
+        # log into.
+        stored = User.objects.get(pk=created['id'])
+        self.assertTrue(stored.has_usable_password())
+        self.assertEqual(stored.company_id, self.company.pk)
+        response = self.client.post('/api/auth/login/',
+                                    {'username': 'newhire', 'password': self.NEW_PASSWORD},
+                                    content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['user']['username'], 'newhire')
+
+    def test_create_user_without_a_password_is_refused_and_creates_nothing(self):
+        """
+        Stricter than the API on purpose. UserAdminSerializer.create falls back
+        to set_unusable_password(), so the call would 201 with a seat consumed
+        by an account nobody can ever use.
+        """
+        before = User.objects.count()
+        text = self.call_raises('create_user', self.admin, data={
+            'username': 'nopass', 'email': 'nopass@example.com',
+            'role': 'EMPLOYEE', 'branch': self.kohima.pk,
+        })
+        self.assertIn('Missing required field', text)
+        self.assertIn('password', text)
+        self.assertFalse(User.objects.filter(username='nopass').exists())
+        self.assertEqual(User.objects.count(), before)
+
+    def test_update_user_role_and_branch_work_for_a_company_admin(self):
+        updated = self.call('update_user', self.admin, id=self.emp_k1.pk,
+                            data={'role': 'BRANCH_MANAGER', 'branch': self.dimapur.pk})
+        self.assertEqual(updated['role'], 'BRANCH_MANAGER')
+        self.assertEqual(updated['branch'], self.dimapur.pk)
+        self.emp_k1.refresh_from_db()
+        self.assertEqual(self.emp_k1.role, Role.BRANCH_MANAGER)
+        self.assertEqual(self.emp_k1.branch_id, self.dimapur.pk)
+
+    def test_a_role_change_a_caller_may_not_make_is_refused_by_the_api(self):
+        """
+        The refusal is the server's, not the tool's — which is the whole point
+        of recording the admin shape. It arrives in three different ways, so
+        all three are pinned rather than assumed:
+
+        a manager who CAN see the row but lacks manageUsers is refused by
+        perform_update with 403; an employee cannot see anyone else's row at
+        all, so UserViewSet.get_queryset makes it a 404 before authorization is
+        even reached; and on their OWN row the request succeeds with `role`
+        silently dropped by UserSerializer, which is why the resource note
+        tells a caller to read the answer back.
+        """
+        text = self.call_raises('update_user', self.mgr_k, id=self.emp_k1.pk,
+                                data={'role': 'BRANCH_MANAGER'})
+        self.assertIn('403', text)
+        self.assertIn('your own profile', text)
+
+        text = self.call_raises('update_user', self.emp_k1, id=self.emp_k2.pk,
+                                data={'role': 'BRANCH_MANAGER'})
+        self.assertIn('404', text)
+
+        on_self = self.call('update_user', self.emp_k1, id=self.emp_k1.pk,
+                            data={'role': 'COMPANY_ADMIN', 'phone': '9123456780'})
+        self.assertEqual(on_self['role'], 'EMPLOYEE')
+        self.assertEqual(on_self['phone'], '9123456780')
+
+        for user in (self.emp_k1, self.emp_k2):
+            user.refresh_from_db()
+            self.assertEqual(user.role, Role.EMPLOYEE)
+
+    def test_update_company_is_active_works_for_a_dev_admin(self):
+        updated = self.call('update_company', self.dev, id=self.company.pk, data={'is_active': False})
+        self.assertIs(updated['is_active'], False)
+        self.company.refresh_from_db()
+        self.assertFalse(self.company.is_active)
+
+    def test_update_company_is_active_is_dropped_for_a_company_admin(self):
+        """
+        Not a 403. CompanyProfileSerializer lists is_active in
+        read_only_fields, and DRF drops a read-only field silently, so the call
+        answers 200 with the flag unchanged. The tool returns exactly what the
+        API returned, so the unchanged value is visible in the answer — which
+        is what the resource note tells a caller to read back.
+        """
+        updated = self.call('update_company', self.admin, id=self.company.pk,
+                            data={'is_active': False, 'phone': '9999999999'})
+        self.assertIs(updated['is_active'], True)
+        self.assertEqual(updated['phone'], '9999999999')
+        self.company.refresh_from_db()
+        self.assertTrue(self.company.is_active)
+
+    def test_the_descriptions_carry_the_admin_shape_and_the_caller_rule(self):
+        tools = self.tool_names(self.admin)
+        create_user = tools['create_user'].description
+        self.assertIn('password:string*', create_user)
+        self.assertIn('role:choice[', create_user)
+        self.assertIn('branch:id(id of Branch)', create_user)
+        self.assertIn('403', create_user)
+        update_company = tools['update_company'].description
+        self.assertIn('is_active:boolean', update_company)
+        self.assertIn('DEV_ADMIN', update_company)

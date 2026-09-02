@@ -158,16 +158,83 @@ class CatalogBuildTests(SimpleTestCase):
         for key in (('tasks', 'reorder'), ('transfers', 'accept'), ('users', 'me')):
             self.assertFalse(actions[key]['destructive'], key)
 
-    def test_companies_notes_record_the_admin_only_is_active(self):
+    def _field(self, prefix, name):
+        return next(f for f in self.by_prefix[prefix]['fields'] if f['name'] == name)
+
+    def test_companies_is_active_is_recorded_writable_with_the_caller_rule_in_the_notes(self):
         # The catalog probes as an anonymous caller, so CompanyViewSet hands it
-        # CompanyProfileSerializer and `is_active` comes back read-only. Without
-        # a note, a generated update_company tool would refuse the one write a
-        # DEV_ADMIN needs it for.
+        # CompanyProfileSerializer and `is_active` comes back read-only. A note
+        # alone was not enough: generated.py turns `fields` into a hard
+        # client-side gate, so update_company refused the one write the note
+        # advertised. FIELD_OVERRIDES records the DEV_ADMIN shape instead.
+        is_active = self._field('companies', 'is_active')
+        self.assertFalse(is_active['read_only'], 'the DEV_ADMIN shape is what the tools must send')
+        self.assertFalse(is_active['required'])
         notes = ' '.join(self.by_prefix['companies']['notes'])
         self.assertIn('is_active', notes)
         self.assertIn('DEV_ADMIN', notes)
-        is_active = next(f for f in self.by_prefix['companies']['fields'] if f['name'] == 'is_active')
-        self.assertTrue(is_active['read_only'], 'the note exists because the probed field is read-only')
+
+    def test_users_fields_record_the_admin_shape(self):
+        # UserViewSet.get_serializer_class picks by WHO is asking, so the
+        # anonymous probe saw UserSerializer: role, branch and
+        # managed_managers read-only, and no `password` field at all. That made
+        # every role or branch change impossible through a tool, and made
+        # create_user drop `password` as an unknown field and then succeed,
+        # saving an account with an unusable password and the model's default
+        # role. The admin shape is recorded here and the API decides.
+        for name, related in (('role', None), ('branch', 'Branch'), ('managed_managers', 'User')):
+            with self.subTest(field=name):
+                field = self._field('users', name)
+                self.assertFalse(field['read_only'])
+                self.assertFalse(field['required'], 'the serializer does not require it')
+                if related:
+                    self.assertEqual(field['related_model'], related)
+        password = self._field('users', 'password')
+        self.assertTrue(password['write_only'])
+        self.assertFalse(password['read_only'])
+        self.assertTrue(password['required'],
+                        'create_user must ask for it; validate_payload(partial=True) skips it on update')
+        self.assertEqual(password['type'], 'string')
+
+    def test_users_notes_explain_who_the_recorded_shape_belongs_to(self):
+        notes = ' '.join(self.by_prefix['users']['notes'])
+        self.assertIn('UserAdminSerializer', notes)
+        self.assertIn('password', notes)
+        # All three server answers a non-admin can get, because none of them is
+        # a client-side refusal any more.
+        self.assertIn('403', notes)
+        self.assertIn('404', notes)
+        self.assertIn('silently dropped', notes)
+
+    def test_field_overrides_are_declared_only_for_caller_dependent_resources(self):
+        """
+        Every override has to name a registered prefix, and every field it
+        patches has to be one the probe really produced — otherwise a rename in
+        a serializer would leave a stale entry silently describing a field that
+        no longer exists. The one exception is a field the narrow serializer
+        does not have at all, which must therefore carry the whole entry.
+        """
+        self.assertEqual(set(mcp_catalog.FIELD_OVERRIDES), {'users', 'companies'})
+        shape = set(self._field('enquiries', 'candidate_name'))
+        viewsets = {prefix: viewset for prefix, viewset, _ in router.registry}
+        for prefix, overrides in mcp_catalog.FIELD_OVERRIDES.items():
+            probed = {f['name'] for f in mcp_catalog._serializer_fields(viewsets[prefix])}
+            for name, patch in overrides.items():
+                with self.subTest(prefix=prefix, field=name):
+                    if name in probed:
+                        self.assertTrue(set(patch) <= shape, f'{name} patches unknown keys')
+                    else:
+                        self.assertEqual(set(patch), shape,
+                                         f'{name} is not on the probed serializer, so it must be complete')
+
+    def test_every_field_entry_has_the_same_shape(self):
+        """Consumers index into a field rather than testing for keys, so an
+        overridden or appended entry must look exactly like a probed one."""
+        shape = set(self._field('enquiries', 'candidate_name'))
+        for prefix, resource in self.by_prefix.items():
+            for field in resource['fields']:
+                with self.subTest(prefix=prefix, field=field.get('name')):
+                    self.assertEqual(set(field), shape)
 
     def test_every_custom_action_is_listed_with_a_tool_name(self):
         expected = {

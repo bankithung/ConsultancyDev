@@ -249,7 +249,21 @@ RESOURCE_NOTES = {
         'entity_type must be one of the transfers/approvals allowlist; `appointment` is accepted by the model but rejected at validation.',
     ],
     'users': [
-        'Serializer depends on the CALLER: admins get UserAdminSerializer (role, branch, password, managed_managers writable).',
+        # `fields` below is the ADMIN shape (see FIELD_OVERRIDES): the probe is
+        # anonymous and would otherwise record UserSerializer, where role,
+        # branch and managed_managers are read-only and `password` does not
+        # exist at all.
+        'Serializer depends on the CALLER: admins get UserAdminSerializer (role, branch, password, '
+        'managed_managers writable) and everyone else gets UserSerializer, where all four are read-only.',
+        'The `fields` below record that ADMIN shape, so the tools send those fields and the API decides. '
+        'A caller without manageUsers is refused by the SERVER, three ways: 403 "You can only edit your '
+        'own profile" on a row they can see, 404 on one they cannot (an employee sees only themselves), '
+        'and on their OWN row a 200 with role/branch silently dropped. Read the answer back rather than '
+        'assuming the change landed.',
+        '`password` is write-only and REQUIRED by create_user, which is stricter than the serializer on '
+        'purpose: the API accepts a create with no password and saves an account with an unusable one, '
+        'consuming a company seat for a user who can never log in. On update it is optional, and setting '
+        "it revokes that user's tokens and API keys. Django's password validators apply.",
         'Head/branch managers may only create EMPLOYEE accounts in their own branches.',
         # permission_classes/read_roles/write_roles below are the viewset-level
         # defaults; UserViewSet.get_permissions() varies them per action.
@@ -261,11 +275,14 @@ RESOURCE_NOTES = {
     'companies': [
         # `fields` below is probed anonymously, so CompanyViewSet.get_serializer_class
         # returns CompanyProfileSerializer and `is_active` comes back read-only.
-        # Without this note a generated update_company tool would refuse the one
-        # write a DEV_ADMIN needs it for.
-        'The serializer depends on the CALLER, so the read_only flags below are the NARROW view: '
-        'a DEV_ADMIN gets CompanySerializer, where `is_active` is writable. Everyone else gets '
-        'CompanyProfileSerializer, which adds `is_active` to the read-only set.',
+        # FIELD_OVERRIDES restores the DEV_ADMIN shape: a note alone left
+        # update_company refusing the one write the note advertised.
+        'The serializer depends on the CALLER: a DEV_ADMIN gets CompanySerializer, where `is_active` '
+        'is writable, and everyone else gets CompanyProfileSerializer, which adds `is_active` to the '
+        'read-only set. The read_only flags below record the DEV_ADMIN shape.',
+        'So update_company sends `is_active` and the API decides. For a caller who is not a DEV_ADMIN '
+        'that is NOT a 403: DRF drops a read-only field silently, so the call answers 200 with '
+        '`is_active` unchanged. Read it back in the response instead of assuming the suspension took.',
         '`is_active` is the tenant suspension switch, writable by DEV_ADMIN only: a company the '
         'operator has disabled must not be able to re-enable itself.',
         '`slug`, `created_at` and `subscription` are read-only for EVERY caller, so a company admin '
@@ -392,6 +409,66 @@ def _serializer_fields(viewset_class):
             'related_model': _related_model(field),
             'help': str(getattr(field, 'help_text', '') or ''),
         })
+    return out
+
+
+# Caller-dependent serializers, recorded as the ADMIN sees them.
+#
+# _serializer_fields probes with _AnonymousProbe, which is right for the
+# resources whose serializer is the same for everyone. `users` and `companies`
+# choose theirs by WHO IS ASKING, so the probe recorded the narrowest caller's
+# shape as if it were everyone's.
+#
+# That is not merely under-describing the API. generated.validate_payload turns
+# `fields` into a hard client-side gate, so the narrow shape made
+# update_company({'is_active': False}) strip every field and refuse the one
+# write RESOURCE_NOTES advertised, made every role and branch change impossible
+# through a tool, and — worst — made create_user reject `password` as an
+# unknown field and then SUCCEED without it, saving an account with the model's
+# default role and an unusable password while consuming a seat. Documentation
+# cannot fix a validator, so the shape is fixed here.
+#
+# The tools now send these fields and the API decides. A caller who is not an
+# admin gets the server's own refusal, which is the answer that is actually
+# true for them; RESOURCE_NOTES says what that looks like per resource.
+#
+# Each entry PATCHES the probed field of the same name. A name the probe never
+# saw is appended as a whole field entry — `password` exists only on
+# UserAdminSerializer — and must therefore carry every key, because consumers
+# index into a field rather than testing for keys.
+FIELD_OVERRIDES = {
+    'users': {
+        'role': {'read_only': False},
+        'branch': {'read_only': False, 'related_model': 'Branch'},
+        'managed_managers': {'read_only': False, 'related_model': 'User'},
+        # `required` is read on create only (validate_payload skips it when
+        # partial), which is exactly the rule wanted: create_user must ask for
+        # a password, update_user must not. The SERIALIZER has it optional —
+        # UserAdminSerializer.create falls back to set_unusable_password() —
+        # and that fallback is the defect, so the catalog is deliberately
+        # stricter than the API here.
+        'password': {
+            'name': 'password', 'type': 'string', 'required': True, 'read_only': False,
+            'write_only': True, 'choices': None, 'max_length': None, 'related_model': None,
+            'help': "Required on create: without it the API saves an account nobody can log into. "
+                    "On update it resets the password and revokes that user's tokens and API keys. "
+                    "Django's password validators apply.",
+        },
+    },
+    'companies': {
+        'is_active': {'read_only': False},
+    },
+}
+
+
+def _apply_field_overrides(prefix, fields):
+    """The probed fields with FIELD_OVERRIDES laid over them (see above)."""
+    overrides = FIELD_OVERRIDES.get(prefix)
+    if not overrides:
+        return fields
+    probed = {f['name'] for f in fields}
+    out = [{**f, **overrides[f['name']]} if f['name'] in overrides else f for f in fields]
+    out += [dict(patch) for name, patch in overrides.items() if name not in probed]
     return out
 
 
@@ -592,7 +669,7 @@ def _resource(prefix, viewset_class):
         'read_roles': list(read_roles),
         'write_roles': list(write_roles),
         'delete_requires_capability': 'deleteRecords' if is_scoped else None,
-        'fields': _serializer_fields(viewset_class),
+        'fields': _apply_field_overrides(prefix, _serializer_fields(viewset_class)),
         'filters': _filters(viewset_class),
         'search_fields': list(getattr(viewset_class, 'search_fields', ()) or ()),
         'ordering_fields': list(getattr(viewset_class, 'ordering_fields', ()) or ()),
