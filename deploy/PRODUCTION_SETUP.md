@@ -132,18 +132,41 @@ request carries the user's own key, created on the console's Profile page.
 ```bash
 sudo cp deploy/consultancy-mcp.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now consultancy-mcp
+```
 
-# nginx routes /mcp to the unit, and an existing deployment's config predates
-# that block: redeploy section 6's config first, or /mcp answers 404.
-sudo cp deploy/nginx.console.nexxteducation.in.conf /etc/nginx/sites-available/console.nexxteducation.in
+### nginx
+
+nginx routes `/mcp` to the unit on `127.0.0.1:8765`, and that routing lives in section 6's
+config. What to do here depends on whether certbot has already touched that file.
+
+**Fresh install, before you run `certbot --nginx`.** Section 6 copies the whole template, and the
+template already carries the MCP blocks. Nothing to do; carry on to the reload below.
+
+**Existing deployment.** Do **not** copy the template over the live vhost. `certbot --nginx`
+rewrote that file in place when you ran section 6: it added the `listen 443` server block, the
+certificate directives and the 301 redirect, and none of that exists in the repo template, which
+is port 80 only. Copying it back takes the console off HTTPS, and `nginx -t` will not catch it —
+the template is perfectly valid, so the reload succeeds and the site simply stops serving TLS.
+
+Edit the deployed vhost instead and paste in three blocks from
+`deploy/nginx.console.nexxteducation.in.conf`, unchanged:
+
+| Block in the template | Where it goes in your vhost |
+|---|---|
+| `upstream consultancy_mcp { ... }` | top of the file, outside every `server` block |
+| `location /mcp { ... }` | inside the `listen 443` server block |
+| `location = /mcp/health { ... }` | inside the same `listen 443` server block |
+
+After certbot the `listen 80` block usually holds nothing but the redirect to https, so leave it
+alone. If yours still serves traffic, add the two `location` blocks there too.
+
+```bash
+sudoedit /etc/nginx/sites-available/console.nexxteducation.in   # existing deployments only
 sudo nginx -t && sudo systemctl reload nginx
-
 curl -s https://console.nexxteducation.in/mcp/health     # {"status":"ok","version":"1.0.0","read_only":false}
 ```
 
-The `/mcp` proxy to `127.0.0.1:8765` lives in the config in section 6, so a first-time install
-that followed section 6 already has it and only needs the reload above. The endpoint clients
-connect to is `https://console.nexxteducation.in/mcp`.
+The endpoint clients connect to is `https://console.nexxteducation.in/mcp`.
 
 ### Variables
 
