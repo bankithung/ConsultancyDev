@@ -272,6 +272,16 @@ class ErrorTranslationTests(SimpleTestCase):
         self.assertEqual(err.to_dict()['request'], 'GET enquiries/9/')
         self.assertEqual(err.to_dict()['status'], 404)
 
+    def test_list_pages_stops_at_the_default_twenty_page_cap(self):
+        # 25 pages available, one row each: the walk must stop at 20 rather
+        # than pulling the whole table into a tool response.
+        page = body(200, {'count': 25, 'pages': 25, 'page': 1, 'page_size': 1, 'results': [{'id': 1}]})
+        transport = StubTransport(page)
+        rows = ApiClient(transport, self.creds).list_pages('enquiries/', all_pages=True)
+        self.assertEqual(len(rows), 20)
+        self.assertEqual(len(transport.calls), 20)
+        self.assertEqual(transport.calls[-1]['params']['page'], 20)
+
     def test_list_pages_returns_a_bare_array_untouched(self):
         transport = StubTransport(body(200, [{'id': 1}, {'id': 2}]))
         rows = ApiClient(transport, self.creds).list_pages('role-permissions/', all_pages=True)
