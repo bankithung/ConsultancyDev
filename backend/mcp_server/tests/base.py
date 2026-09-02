@@ -24,12 +24,18 @@ from mcp.shared.memory import create_connected_server_and_client_session
 
 from core import services
 from core.models import ApiKey, Branch, Enquiry, Role
+from mcp_server.catalog import load_catalog
 from mcp_server.config import Settings
 from mcp_server.server import build_server
 from mcp_server.testing import DjangoTestTransport
 
 User = get_user_model()
 PASSWORD = 'Testing!2026xyz'
+
+# Parsed once for the whole suite. Every tool call builds a server, and a
+# server would otherwise re-read and re-parse catalog.json (a quarter of a
+# megabyte) each time. The Catalog is read-only, so one instance is safe to share.
+CATALOG = load_catalog()
 
 # The project's real REST_FRAMEWORK minus the throttles: a test that walks
 # pages would otherwise trip the burst bucket and fail on timing.
@@ -52,8 +58,12 @@ RF = {
 
 # Building a server logs a one-line summary and the SDK narrates every request
 # at INFO, all of it through the project's root console handler. A suite that
-# starts a server per call would bury its own result in that.
-NOISY_LOGGERS = ('mcp', 'mcp_server', 'httpx')
+# starts a server per call would bury its own result in that. `core` and
+# `core.security` are here for the same reason from the other end: a tool call
+# runs the real viewset, which announces every transfer, registration and
+# activation change it applies. Both carry an explicit level in settings.LOGGING,
+# so quietening the parent alone would not reach `core.security`.
+NOISY_LOGGERS = ('mcp', 'mcp_server', 'httpx', 'core', 'core.security')
 
 
 class QuietLogsMixin:
@@ -170,7 +180,7 @@ class McpTestCase(QuietLogsMixin, TestCase):
     def server_for(self, user, read_only=False, **settings_overrides):
         settings = Settings(api_url='http://testserver/api/', api_key=self.key_for(user), read_only=read_only,
                             **settings_overrides)
-        return build_server(settings, transport=DjangoTestTransport())
+        return build_server(settings, transport=DjangoTestTransport(), catalog=CATALOG)
 
     @staticmethod
     def _unwrap(result):

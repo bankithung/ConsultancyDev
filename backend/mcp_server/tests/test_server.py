@@ -176,9 +176,9 @@ class HttpAppTests(QuietLogsMixin, SimpleTestCase):
 
 class ServerSmokeTests(McpTestCase):
     """
-    Tasks 7 to 11 replace the placeholder register_* modules; until then the
-    only registered tool is whoami, so the full tool surface is asserted
-    against the catalog's derived names rather than against the live server.
+    The whole assembled server, not one tool module: what every module has to
+    hold true together. Tools registered by a module are covered in that
+    module's own test file.
     """
 
     def test_server_builds_and_registers_whoami(self):
@@ -193,17 +193,31 @@ class ServerSmokeTests(McpTestCase):
             self.assertIn(name, names)
 
     def test_read_only_hides_every_write_tool(self):
-        """
-        Only whoami is registered yet, so the write half of this is vacuous
-        today and arms itself the moment Task 7 registers a write tool: the
-        names come from the catalog, not from a list that could drift.
-        """
+        """The names come from the catalog, not from a list that could drift."""
         tools = self.tool_names(self.admin, read_only=True)
         self.assertIn('whoami', tools)
         write_tools = {n for n in load_catalog().all_tool_names()
                        if n.startswith(('create_', 'update_', 'delete_'))}
         self.assertTrue(write_tools, 'catalog produced no write tool names')
         self.assertEqual(set(), write_tools & set(tools))
+
+    def test_read_only_mode_registers_nothing_that_writes(self):
+        """
+        The single read-only guard for EVERY tool module, generated or
+        hand-written: read_only=True is a promise made to the operator who set
+        it, so it is asserted over the live registry rather than per module.
+        A tool that writes must not be registered, and a tool that is
+        registered must say it only reads.
+        """
+        tools = self.tool_names(self.admin, read_only=True)
+        self.assertGreater(len(tools), 50, 'read-only mode should still expose the read surface')
+        for name, tool in sorted(tools.items()):
+            with self.subTest(tool=name):
+                self.assertFalse(name.startswith(('create_', 'update_', 'delete_')),
+                                 f'{name} is registered in read-only mode')
+                self.assertIsNotNone(tool.annotations, f'{name} has no annotations')
+                self.assertIs(tool.annotations.readOnlyHint, True,
+                              f'{name} is registered in read-only mode without readOnlyHint')
 
     def test_whoami_uses_the_key_owner(self):
         me = self.call('whoami', self.emp_k1)

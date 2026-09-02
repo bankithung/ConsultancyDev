@@ -58,7 +58,8 @@ def run_api(fn):
         raise ToolError(str(exc)) from exc
 
 
-def build_server(settings: Settings, transport: Transport | None = None) -> FastMCP:
+def build_server(settings: Settings, transport: Transport | None = None,
+                 catalog: Catalog | None = None) -> FastMCP:
     # Imported here, not at module scope: every register_* module imports
     # ServerState and client_for from this one, so a top-level import would
     # be circular.
@@ -70,7 +71,10 @@ def build_server(settings: Settings, transport: Transport | None = None) -> Fast
     from .tools.generated import register_generated_tools
     from .tools.workflows import register_workflow_tools
 
-    catalog = load_catalog()
+    # `catalog` is injectable so a caller that builds many servers — the test
+    # suite builds one per tool call — can parse catalog.json once. It is
+    # read-only, so one instance is safely shared.
+    catalog = catalog or load_catalog()
     state = ServerState(
         settings=settings, catalog=catalog,
         transport=transport or HttpxTransport(settings.api_url, timeout=settings.timeout_seconds),
@@ -106,8 +110,9 @@ class BearerRequiredMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-def create_http_app(settings: Settings, transport: Transport | None = None):
-    mcp = build_server(settings, transport=transport)
+def create_http_app(settings: Settings, transport: Transport | None = None,
+                    catalog: Catalog | None = None):
+    mcp = build_server(settings, transport=transport, catalog=catalog)
 
     @mcp.custom_route('/health', methods=['GET'])
     async def health(request: Request):

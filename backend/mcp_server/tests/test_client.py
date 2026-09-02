@@ -16,6 +16,8 @@ from core.models import ApiKey, Enquiry, Role
 from mcp_server.client import ApiClient, ApiError, Credentials, HttpxTransport, Response, hint_for
 from mcp_server.testing import DjangoTestTransport
 
+from .base import QuietLogsMixin
+
 User = get_user_model()
 PASSWORD = 'Testing!2026xyz'
 
@@ -97,7 +99,9 @@ def body(status, payload, headers=None):
 
 
 @override_settings(REST_FRAMEWORK=RF)
-class ApiClientTests(TestCase):
+class ApiClientTests(QuietLogsMixin, TestCase):
+    # These tests drive the real viewsets, which announce a download and a
+    # login at INFO through the project's console handler.
     @classmethod
     def setUpTestData(cls):
         services.ensure_default_plans()
