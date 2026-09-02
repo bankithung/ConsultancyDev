@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-02T11:29:30.930743+00:00",
+  "generated_at": "2026-09-02T11:46:30.649381+00:00",
   "resources": [
     {
       "prefix": "agents",
@@ -15,6 +15,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission",
@@ -274,6 +282,14 @@
         "GET",
         "POST"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": false,
+        "create": true,
+        "update": false,
+        "partial_update": false,
+        "destroy": false
+      },
       "list_paginated": true,
       "permission_classes": [
         "IsAuthenticatedAndActive"
@@ -447,6 +463,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -813,6 +837,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "IsAuthenticatedAndActive"
@@ -1138,6 +1170,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ReadOnlyOrCompanyAdmin"
@@ -1326,6 +1366,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission",
@@ -1599,6 +1647,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "CanManageOwnCompany"
@@ -1744,7 +1800,12 @@
       ],
       "ordering_fields": [],
       "actions": [],
-      "notes": []
+      "notes": [
+        "The serializer depends on the CALLER, so the read_only flags below are the NARROW view: a DEV_ADMIN gets CompanySerializer, where `is_active` is writable. Everyone else gets CompanyProfileSerializer, which adds `is_active` to the read-only set.",
+        "`is_active` is the tenant suspension switch, writable by DEV_ADMIN only: a company the operator has disabled must not be able to re-enable itself.",
+        "`slug`, `created_at` and `subscription` are read-only for EVERY caller, so a company admin cannot change the tenant key or lift their own plan, seat and branch caps.",
+        "A COMPANY_ADMIN may edit only name, email, phone and address on their own company."
+      ]
     },
     {
       "prefix": "documents",
@@ -1759,6 +1820,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -2146,6 +2215,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -2925,6 +3002,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -3308,6 +3393,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -3528,6 +3621,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -3937,6 +4038,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -4057,6 +4166,14 @@
       "methods": [
         "GET"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": false,
+        "update": false,
+        "partial_update": false,
+        "destroy": false
+      },
       "list_paginated": true,
       "permission_classes": [
         "IsAuthenticatedAndActive"
@@ -4232,6 +4349,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -4594,6 +4719,14 @@
       "methods": [
         "GET"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": false,
+        "update": false,
+        "partial_update": false,
+        "destroy": false
+      },
       "list_paginated": false,
       "permission_classes": [
         "AllowAny"
@@ -4748,6 +4881,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission",
@@ -5055,6 +5196,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -5860,6 +6009,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "IsAuthenticated"
@@ -6135,6 +6292,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -6479,6 +6644,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -6695,6 +6868,14 @@
       "methods": [
         "GET"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": false,
+        "update": false,
+        "partial_update": false,
+        "destroy": false
+      },
       "list_paginated": true,
       "permission_classes": [
         "IsAuthenticatedAndActive"
@@ -6903,6 +7084,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -7214,6 +7403,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"
@@ -7471,6 +7668,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "IsAuthenticatedAndActive"
@@ -7795,6 +8000,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ReadOnlyOrManager"
@@ -7978,6 +8191,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "IsAuthenticated"
@@ -8331,6 +8552,14 @@
         "PUT",
         "DELETE"
       ],
+      "verbs": {
+        "list": true,
+        "retrieve": true,
+        "create": true,
+        "update": true,
+        "partial_update": true,
+        "destroy": true
+      },
       "list_paginated": true,
       "permission_classes": [
         "ScopedObjectPermission"

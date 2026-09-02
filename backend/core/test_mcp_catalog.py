@@ -69,6 +69,50 @@ class CatalogBuildTests(SimpleTestCase):
         self.assertIn('DELETE', self.by_prefix['enquiries']['methods'])
         self.assertEqual(self.by_prefix['notifications']['methods'], ['GET'])
 
+    def test_every_resource_carries_the_six_verbs(self):
+        expected = {'list', 'retrieve', 'create', 'update', 'partial_update', 'destroy'}
+        for prefix, resource in self.by_prefix.items():
+            with self.subTest(prefix=prefix):
+                self.assertEqual(set(resource['verbs']), expected)
+                for name, present in resource['verbs'].items():
+                    self.assertIsInstance(present, bool, f'{prefix}.{name} must be a boolean')
+
+    def test_verbs_report_the_handlers_each_viewset_defines(self):
+        # `methods` cannot say "list but no retrieve": api-keys/ has no detail
+        # route, so a generator reading GET alone would emit a get_api_key tool
+        # pointing at a URL that does not resolve.
+        self.assertEqual(self.by_prefix['api-keys']['verbs'], {
+            'list': True, 'retrieve': False, 'create': True,
+            'update': False, 'partial_update': False, 'destroy': False,
+        })
+        # A full ModelViewSet defines all six.
+        self.assertEqual(self.by_prefix['enquiries']['verbs'], {
+            'list': True, 'retrieve': True, 'create': True,
+            'update': True, 'partial_update': True, 'destroy': True,
+        })
+        # Append-only in behaviour, but the routes exist and answer 403 from
+        # perform_update/perform_destroy, so the handlers are still defined.
+        self.assertEqual(self.by_prefix['follow-up-comments']['verbs'], {
+            'list': True, 'retrieve': True, 'create': True,
+            'update': True, 'partial_update': True, 'destroy': True,
+        })
+        # ReadOnlyModelViewSet: both reads, no writes.
+        self.assertEqual(self.by_prefix['notifications']['verbs'], {
+            'list': True, 'retrieve': True, 'create': False,
+            'update': False, 'partial_update': False, 'destroy': False,
+        })
+
+    def test_companies_notes_record_the_admin_only_is_active(self):
+        # The catalog probes as an anonymous caller, so CompanyViewSet hands it
+        # CompanyProfileSerializer and `is_active` comes back read-only. Without
+        # a note, a generated update_company tool would refuse the one write a
+        # DEV_ADMIN needs it for.
+        notes = ' '.join(self.by_prefix['companies']['notes'])
+        self.assertIn('is_active', notes)
+        self.assertIn('DEV_ADMIN', notes)
+        is_active = next(f for f in self.by_prefix['companies']['fields'] if f['name'] == 'is_active')
+        self.assertTrue(is_active['read_only'], 'the note exists because the probed field is read-only')
+
     def test_every_custom_action_is_listed_with_a_tool_name(self):
         expected = {
             ('users', 'me'), ('users', 'change_password'), ('users', 'set_active'), ('users', 'counselors'),
@@ -121,6 +165,17 @@ class CatalogBuildTests(SimpleTestCase):
         md = mcp_catalog.render_tools_markdown(self.catalog)
         self.assertIn('| `list_enquiries` |', md)
         self.assertIn('| `download_document` |', md)
+
+    def test_markdown_omits_tools_the_viewset_cannot_route(self):
+        md = mcp_catalog.render_tools_markdown(self.catalog)
+        self.assertIn('| `list_api_keys` |', md)
+        self.assertIn('| `create_api_key` |', md)
+        # api-keys/ has no detail route, so there is no such tool to advertise.
+        self.assertNotIn('get_api_key', md)
+        # notifications/ is read-only: reads yes, writes no.
+        self.assertIn('| `get_notification` |', md)
+        self.assertNotIn('create_notification', md)
+        self.assertNotIn('delete_notification', md)
 
 
 class CatalogFreshnessTests(SimpleTestCase):

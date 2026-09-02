@@ -249,6 +249,20 @@ RESOURCE_NOTES = {
         'destroy and set-active need manageUsers, counselors needs manageCounselors, '
         'and everything else needs only an authenticated active account.',
     ],
+    'companies': [
+        # `fields` below is probed anonymously, so CompanyViewSet.get_serializer_class
+        # returns CompanyProfileSerializer and `is_active` comes back read-only.
+        # Without this note a generated update_company tool would refuse the one
+        # write a DEV_ADMIN needs it for.
+        'The serializer depends on the CALLER, so the read_only flags below are the NARROW view: '
+        'a DEV_ADMIN gets CompanySerializer, where `is_active` is writable. Everyone else gets '
+        'CompanyProfileSerializer, which adds `is_active` to the read-only set.',
+        '`is_active` is the tenant suspension switch, writable by DEV_ADMIN only: a company the '
+        'operator has disabled must not be able to re-enable itself.',
+        '`slug`, `created_at` and `subscription` are read-only for EVERY caller, so a company admin '
+        'cannot change the tenant key or lift their own plan, seat and branch caps.',
+        'A COMPANY_ADMIN may edit only name, email, phone and address on their own company.',
+    ],
     'branches': ['The default branch cannot be deleted; a branch with users cannot be deleted.'],
     'signup-requests': [
         # As above: SignupRequestViewSet.get_permissions() varies per action, so
@@ -414,6 +428,12 @@ def _filters(viewset_class):
     return out
 
 
+# The six routable viewset actions, in the order a reader thinks about them.
+# ModelViewSet supplies them as mixin methods, so presence on the class is what
+# decides whether the router builds a route.
+VERB_HANDLERS = ('list', 'retrieve', 'create', 'update', 'partial_update', 'destroy')
+
+
 def _methods(viewset_class):
     verbs = []
     if hasattr(viewset_class, 'list') or hasattr(viewset_class, 'retrieve'):
@@ -427,6 +447,20 @@ def _methods(viewset_class):
     if hasattr(viewset_class, 'destroy'):
         verbs.append('DELETE')
     return verbs
+
+
+def _verbs(viewset_class):
+    """
+    Which of the six actions the viewset actually defines.
+
+    `methods` collapses list and retrieve into a single GET and so cannot say
+    "lists, but has no detail route" — which is exactly ApiKeyViewSet, a
+    GenericViewSet with `list` and `create` and nothing else. A generator
+    reading GET alone emits a get_api_key tool pointing at a URL the router
+    never built. Read this rather than `methods` when deciding which tools to
+    emit; `methods` stays the HTTP-verb summary.
+    """
+    return {name: hasattr(viewset_class, name) for name in VERB_HANDLERS}
 
 
 # Permission classes that only establish "authenticated, active and scoped to
@@ -478,6 +512,23 @@ def _actions(prefix, viewset_class):
 
 
 def _resource(prefix, viewset_class):
+    """
+    One resource entry. EVERY key below is always present, even when empty —
+    consumers index into this shape rather than testing for keys.
+
+        prefix, name, singular, model, entity_type
+        methods                     HTTP verbs the viewset answers
+        verbs                       the six routable actions, as booleans;
+                                    read this, not `methods`, to decide which
+                                    tools exist (see _verbs)
+        list_paginated
+        permission_classes, read_capability, write_capability,
+        read_roles, write_roles, delete_requires_capability
+        fields, filters, search_fields, ordering_fields
+        actions                     custom @action routes
+        notes                       hand-written knowledge introspection
+                                    cannot reach (see RESOURCE_NOTES)
+    """
     plural, singular = RESOURCE_NAMES[prefix]
     names, (read_cap, write_cap, read_roles, write_roles) = _permission_summary(viewset_class)
     model = _queryset_model(viewset_class)
@@ -489,6 +540,7 @@ def _resource(prefix, viewset_class):
         'model': model.__name__ if model is not None else None,
         'entity_type': getattr(viewset_class, 'entity_type', None),
         'methods': _methods(viewset_class),
+        'verbs': _verbs(viewset_class),
         'list_paginated': getattr(viewset_class, 'pagination_class', 'default') is not None,
         'permission_classes': names,
         'read_capability': read_cap,
@@ -652,14 +704,19 @@ def render_tools_markdown(catalog):
              '| Tool | Kind | API | Capability |', '|---|---|---|---|']
     for r in catalog['resources']:
         cap = r['write_capability'] or r['read_capability'] or ''
-        if 'GET' in r['methods']:
+        # Driven by `verbs`, not `methods`: a viewset with `list` but no
+        # `retrieve` must not get a get_<singular> row for a route that does
+        # not exist. See _verbs.
+        verbs = r['verbs']
+        if verbs['list']:
             lines.append(f"| `list_{r['name']}` | list | GET {r['prefix']}/ | {r['read_capability'] or ''} |")
+        if verbs['retrieve']:
             lines.append(f"| `get_{r['singular']}` | read | GET {r['prefix']}/{{id}}/ | {r['read_capability'] or ''} |")
-        if 'POST' in r['methods']:
+        if verbs['create']:
             lines.append(f"| `create_{r['singular']}` | write | POST {r['prefix']}/ | {cap} |")
-        if 'PATCH' in r['methods']:
+        if verbs['update'] or verbs['partial_update']:
             lines.append(f"| `update_{r['singular']}` | write | PATCH {r['prefix']}/{{id}}/ | {cap} |")
-        if 'DELETE' in r['methods']:
+        if verbs['destroy']:
             lines.append(f"| `delete_{r['singular']}` | destructive | DELETE {r['prefix']}/{{id}}/ | {r['delete_requires_capability'] or cap} |")
         for a in r['actions']:
             lines.append(f"| `{a['tool_name']}` | action | {a['method']} {a['path']} | |")
