@@ -1677,7 +1677,11 @@ class ApiKeyViewSet(viewsets.GenericViewSet):
             return request.user
         if request.user.is_dev_admin:
             return User.objects.filter(pk=target_id).first() or request.user
-        if request.user.is_company_admin:
+        # `company_id` is nullable, so the role alone is not a tenant. Without
+        # this guard a COMPANY_ADMIN with no company would match company_id=None
+        # — which is exactly the set of dev admins. Same rule as scope_queryset:
+        # a non-dev-admin with no company sees nothing but their own.
+        if request.user.is_company_admin and request.user.company_id:
             target = User.objects.filter(pk=target_id, company_id=request.user.company_id).first()
             if target is None:
                 raise PermissionDenied('That user is not in your company.')
@@ -1692,7 +1696,7 @@ class ApiKeyViewSet(viewsets.GenericViewSet):
         # Detail actions: own keys, plus company staff for admins, everything for dev admins.
         if user.is_dev_admin:
             return qs
-        if user.is_company_admin:
+        if user.is_company_admin and user.company_id:
             return qs.filter(user__company_id=user.company_id)
         return qs.filter(user=user)
 

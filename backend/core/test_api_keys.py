@@ -167,6 +167,9 @@ class ApiKeyEndpointTests(TestCase):
         cls.admin = mk('admin', Role.COMPANY_ADMIN, cls.company, cls.head_office)
         cls.rival_admin = mk('rival_admin', Role.COMPANY_ADMIN, cls.rival, cls.rival_branch)
         cls.dev = mk('dev', Role.DEV_ADMIN, None, None)
+        # COMPANY_ADMIN is a role, not a tenant: `User.company` is nullable, so
+        # this account exists and must not inherit the no-company rows.
+        cls.orphan_admin = mk('orphan_admin', Role.COMPANY_ADMIN, None, None)
 
     def setUp(self):
         cache.clear()
@@ -257,3 +260,34 @@ class ApiKeyEndpointTests(TestCase):
         keyed.credentials(HTTP_AUTHORIZATION=f'Bearer {raw}')
         self.assertEqual(keyed.post('/api/api-keys/', {'name': 'clone'}, format='json').status_code, 403)
         self.assertEqual(keyed.get('/api/api-keys/').status_code, 403)
+
+    def test_company_admin_without_a_company_cannot_reach_dev_admin_keys(self):
+        """
+        A COMPANY_ADMIN whose `company` is null must not become a tenant of the
+        null company. `qs.filter(user__company_id=None)` is precisely the set of
+        dev admins, so without the guard this account could list and revoke
+        platform operators' keys.
+        """
+        dev_key, dev_raw = ApiKey.issue(self.dev, 'platform')
+        own, _ = ApiKey.issue(self.orphan_admin, 'mine')
+        client = self.auth(self.orphan_admin)
+        self.assertEqual(client.get(f'/api/api-keys/?user={self.dev.pk}').status_code, 403)
+        self.assertEqual(client.post(f'/api/api-keys/{dev_key.pk}/revoke/').status_code, 404)
+        listed = client.get('/api/api-keys/')
+        self.assertEqual(listed.data['count'], 1)
+        self.assertEqual(listed.data['results'][0]['id'], own.pk)
+        dev_key.refresh_from_db()
+        self.assertIsNone(dev_key.revoked_at)
+        keyed = APIClient()
+        keyed.credentials(HTTP_AUTHORIZATION=f'Bearer {dev_raw}')
+        self.assertEqual(keyed.get('/api/users/me/').status_code, 200)
+
+    def test_employee_cannot_revoke_a_colleagues_key(self):
+        """Same company is not the same user: revoke by id must not be an IDOR."""
+        key, raw = ApiKey.issue(self.emp, 'a')
+        self.assertEqual(self.auth(self.emp2).post(f'/api/api-keys/{key.pk}/revoke/').status_code, 404)
+        key.refresh_from_db()
+        self.assertIsNone(key.revoked_at)
+        keyed = APIClient()
+        keyed.credentials(HTTP_AUTHORIZATION=f'Bearer {raw}')
+        self.assertEqual(keyed.get('/api/users/me/').status_code, 200)
