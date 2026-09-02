@@ -1,6 +1,8 @@
 import json as jsonlib
 import logging
 import os
+import tempfile
+from pathlib import Path
 from unittest import mock
 
 os.environ.setdefault('DJANGO_ALLOW_ASYNC_UNSAFE', 'true')
@@ -204,12 +206,16 @@ class ApiClientTests(QuietLogsMixin, TestCase):
     def test_multipart_upload_reaches_document_viewset(self):
         data = {'file_name': 'note.pdf', 'type': 'Other'}
         files = {'file': ('note.pdf', b'%PDF-1.4 test', 'application/pdf')}
-        doc = self.client_.post('documents/', data=data, files=files)
-        self.assertEqual(doc['file_name'], 'note.pdf')
-        self.assertTrue(doc['is_encrypted'])
-        raw = self.client_.raw_get(f'documents/{doc["id"]}/download/')
-        self.assertEqual(raw.status, 200)
-        self.assertEqual(raw.content, b'%PDF-1.4 test')
+        # Redirected to a directory that goes away: the store writes the
+        # encrypted blob eagerly and no transaction rolls a file back, so
+        # without this every run leaves one behind in the repository.
+        with tempfile.TemporaryDirectory() as tmp, override_settings(PRIVATE_MEDIA_ROOT=Path(tmp)):
+            doc = self.client_.post('documents/', data=data, files=files)
+            self.assertEqual(doc['file_name'], 'note.pdf')
+            self.assertTrue(doc['is_encrypted'])
+            raw = self.client_.raw_get(f'documents/{doc["id"]}/download/')
+            self.assertEqual(raw.status, 200)
+            self.assertEqual(raw.content, b'%PDF-1.4 test')
 
 
 class HintTests(TestCase):
