@@ -1075,3 +1075,22 @@ export interface ApprovalRequest {
   reviewed_by?: number;
   pending_changes?: Record<string, unknown>;
 }
+
+/** Mirrors `ApiKeySerializer`. The hash is never sent; `prefix` identifies a key in lists. */
+export interface ApiKey {
+  id: number;
+  user: number;
+  user_name: string;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  is_valid: boolean;
+}
+
+/** The create response: the plaintext `key` is returned exactly once. */
+export interface ApiKeyCreated extends ApiKey {
+  key: string;
+}

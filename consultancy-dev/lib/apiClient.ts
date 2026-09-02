@@ -1,6 +1,8 @@
 ﻿import { api, API_URL } from './api';
 import type {
   Agent,
+  ApiKey,
+  ApiKeyCreated,
   Appointment,
   ApprovalRequest,
   Branch,
@@ -28,7 +30,6 @@ import type {
   Registration,
   RegistrationInput,
   Registration as RegistrationType,
-  ReportMetrics,
   SignupRequest,
   StudentDocument,
   StudentDocumentInput,
@@ -1801,6 +1802,27 @@ export const apiClient = {
     },
     getSources: async (): Promise<SourceAnalyticsRow[]> => {
       const res = await api.get<SourceAnalyticsRow[]>('analytics/sources/');
+      return res.data;
+    },
+  },
+
+  /**
+   * Personal API keys for MCP/AI clients and scripts. A key acts as the
+   * signed-in user; the plaintext is only ever present on the create response.
+   * The endpoint refuses sessions authenticated BY a key, so this is only
+   * reachable from a password login.
+   */
+  apiKeys: {
+    list: (params: PageParams = {}): Promise<Paginated<ApiKey>> => fetchPage<ApiKey>('api-keys/', params),
+    create: async (name: string, expiresAt?: string | null): Promise<ApiKeyCreated> => {
+      const res = await api.post<ApiKeyCreated>('api-keys/', {
+        name,
+        ...(expiresAt ? { expires_at: expiresAt } : {}),
+      });
+      return res.data;
+    },
+    revoke: async (id: number): Promise<ApiKey> => {
+      const res = await api.post<ApiKey>(`api-keys/${id}/revoke/`);
       return res.data;
     },
   },

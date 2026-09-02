@@ -33,6 +33,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/toastStore';
 import { isRole } from '@/lib/types';
+import { ApiKeysCard } from './components/ApiKeysCard';
 
 /**
  * The signed-in user's own profile.
@@ -416,6 +417,8 @@ export default function ProfilePage() {
               </div>
             </CardContent>
           </Card>
+
+          <ApiKeysCard />
 
           <Card className="border-slate-200">
             <CardContent className="p-4">
