@@ -54,8 +54,12 @@ There is never a DRF `detail` key on the wire.
 - 403 on a delete means raise an approval request; 403 otherwise is a missing capability.
 - 404 means "not found OR outside your scope" and the API never says which. The wording varies
   and can be Django's own "No <Model> matches the given query."
-- 409 is a unique-value collision. 429 is a throttle. Status 0 is not an API answer at all: it
-  means the backend could not be reached.
+- 409 is any database integrity error, always worded "That operation conflicts with existing
+  data." Usually that is a unique-value collision, and omitting server-assigned references
+  fixes it. It can ALSO mean a required relation came out null — a dev admin creating a branch
+  gets 409 because they have no company. Check that before renaming anything: a collision is
+  worth one retry, a null relation is worth none.
+- 429 is a throttle. Status 0 is not an API answer at all: it means the backend was unreachable.
 
 ## Throttling (production)
 

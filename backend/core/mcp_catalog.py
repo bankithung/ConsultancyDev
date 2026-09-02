@@ -222,8 +222,9 @@ RESOURCE_NOTES = {
         'Read-only in practice: POST cannot work because `enrollment` is read-only on the serializer, '
         'so there is no create_installment tool.',
         'Installments are created only through create_enrollment: pass installments_count (and optionally '
-        'installment_amount) and the server builds the schedule. Existing rows are then updated in place '
-        '(paid_amount, status, paid_date) with update_installment.',
+        'installment_amount) and the server builds the schedule. Settle one with update_installment '
+        '{status, paid_at}; number, due_date and amount are writable too, but rewriting an amount breaks '
+        'the guarantee that the schedule sums to total_fees.',
     ],
     'payments': ['Only status Success counts as revenue. metadata is a free JSON object for method detail.'],
     'documents': [

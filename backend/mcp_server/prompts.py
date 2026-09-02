@@ -83,7 +83,9 @@ def register_prompts(mcp: FastMCP) -> None:
             'consultancy://knowledge/gotchas, explain the cause and the fix. Common cases: 403 on a delete '
             'means raise `create_approval_request` with action="DELETE"; 403 otherwise is a missing capability, '
             'so check `my_capabilities` and `explain_permission`; 404 can mean the record is simply outside my '
-            'visibility scope; 409 is a unique-value collision (omit server-assigned references); 400 with '
-            'fields means fix those fields (check consultancy://schema/<resource>); 429 means slow down; '
-            'status 0 means the backend could not be reached at all.'
+            'visibility scope; 409 is any integrity error — usually a unique-value collision, so omit '
+            'server-assigned references, but it can also mean a required relation was null (a dev admin '
+            'creating a branch), which no amount of renaming will fix; 400 with fields means fix those fields '
+            '(check consultancy://schema/<resource>); 429 means slow down; status 0 means the backend could '
+            'not be reached at all.'
         )]

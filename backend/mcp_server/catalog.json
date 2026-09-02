@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-02T13:31:01.186325+00:00",
+  "generated_at": "2026-09-02T17:28:17.374170+00:00",
   "resources": [
     {
       "prefix": "agents",
@@ -4172,7 +4172,7 @@
       "actions": [],
       "notes": [
         "Read-only in practice: POST cannot work because `enrollment` is read-only on the serializer, so there is no create_installment tool.",
-        "Installments are created only through create_enrollment: pass installments_count (and optionally installment_amount) and the server builds the schedule. Existing rows are then updated in place (paid_amount, status, paid_date) with update_installment."
+        "Installments are created only through create_enrollment: pass installments_count (and optionally installment_amount) and the server builds the schedule. Settle one with update_installment {status, paid_at}; number, due_date and amount are writable too, but rewriting an amount breaks the guarantee that the schedule sums to total_fees."
       ]
     },
     {

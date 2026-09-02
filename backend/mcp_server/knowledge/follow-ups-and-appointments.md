@@ -57,6 +57,12 @@ console board uses Todo, In Progress, Done), `completed_at`, `position` (the kan
 
 ## Reminders
 
-The console's upcoming-reminders widget is follow-ups due plus appointments for the counsellor,
-filtered in the browser because `appointments/` has no counselor filter it can use there.
-`daily_briefing` reproduces the same view server-side and is the one call to make first.
+The console's upcoming-reminders widget combines three lists for one person: their open tasks,
+their pending follow-ups, and their appointments. It narrows the first two with `assigned_to`
+and then filters appointments in the browser, on a stale in-file comment claiming
+`appointments/` has no counselor filter.
+
+It does have one. `counselor` is a real multi-value filter, so narrow server-side with
+`filters={"counselor": [id]}` rather than fetching a page and matching in memory.
+
+`daily_briefing` reproduces the whole widget server-side and is the one call to make first.

@@ -8,8 +8,10 @@ observed against the running backend, not inferred from the models.
 - **POST installments/ cannot work.** `enrollment` is read-only on the serializer while the
   column is not nullable, so a create fails and surfaces as 409. There is no create tool for
   installments. They come only from an enrollment create with `installments_count`.
-- **POST branches/ as a DEV_ADMIN answers 500**, because the create stamps the caller's company
-  and a dev admin has no company. Create branches as a company admin.
+- **POST branches/ as a DEV_ADMIN answers 409**, "That operation conflicts with existing data."
+  The create stamps the caller's company, a dev admin has no company, and the resulting
+  integrity error is mapped to 409 like any other. It is NOT a name collision, so retrying with
+  a different name loops forever. Create branches as a company admin.
 - `appointment` is a valid approval entity type on the model but is rejected at validation, so
   it is dead. Conversely `visa_tracking` is resolvable as a transfer target but is not an
   approval type at all.
@@ -39,8 +41,9 @@ observed against the running backend, not inferred from the models.
 ## Data shape traps
 
 - Approval request statuses are UPPERCASE on the wire (PENDING, APPROVED, REJECTED, FAILED)
-  while the console's own type says title case. FAILED is real and means the action was
-  attempted and did not succeed.
+  while the console's own type says title case. FAILED is declared on the model but nothing
+  ever writes it: the review is atomic and the status is set only after the action succeeds, so
+  a failed approval rolls back and the request is still PENDING. Never report one as failed.
 - Older `preferred_locations` values may be JSON-encoded strings rather than lists. They read
   fine but do not match the `preferred_locations` filter, so a filtered count can be short.
 - A registration has real profile columns (gender, marks, schooling), but the console form

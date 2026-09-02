@@ -34,8 +34,10 @@ even if the request was routed there. Only PENDING requests can be reviewed.
   If nothing in the request survives the allowlist the API answers 400 "No permitted fields
   were included in this request."
 - The status becomes APPROVED or REJECTED only after the action succeeds, inside a transaction,
-  along with `reviewed_by`, `reviewed_at` and `review_note` (sent as the body key `note`). A
-  failed action leaves FAILED.
+  along with `reviewed_by`, `reviewed_at` and `review_note` (sent as the body key `note`).
+- If the action fails the whole review rolls back and the request stays PENDING, so it can be
+  retried or reviewed again. FAILED is declared on the model but nothing ever writes it: no
+  request will come back in that state, and none should be described as failed.
 
 ## Allowlisted update fields
 
