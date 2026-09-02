@@ -78,6 +78,19 @@ class GeneratedRegistrationTests(SimpleTestCase):
         names = {t.name for t in _generated_server()._tool_manager.list_tools()}
         self.assertEqual(names, _expected_names(CATALOG))
 
+    def test_names_account_for_every_name_the_catalog_publishes(self):
+        """
+        Catalog.all_tool_names() is what the resources and the docs advertise.
+        The generator owes all of it except the actions flagged
+        skip_generated, which another module implements by hand.
+        """
+        names = {t.name for t in _generated_server()._tool_manager.list_tools()}
+        published = set(CATALOG.all_tool_names())
+        hand_written = {a['tool_name'] for r in CATALOG.raw['resources']
+                        for a in r['actions'] if a['skip_generated']}
+        self.assertEqual(hand_written, {'download_document'})
+        self.assertEqual(names, published - hand_written)
+
     def test_read_only_mode_emits_only_reads(self):
         names = {t.name for t in _generated_server(read_only=True)._tool_manager.list_tools()}
         self.assertEqual(names, _expected_names(CATALOG, read_only=True))
