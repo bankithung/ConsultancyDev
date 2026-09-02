@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-02T11:46:30.649381+00:00",
+  "generated_at": "2026-09-02T12:58:46.413424+00:00",
   "resources": [
     {
       "prefix": "agents",
@@ -4041,7 +4041,7 @@
       "verbs": {
         "list": true,
         "retrieve": true,
-        "create": true,
+        "create": false,
         "update": true,
         "partial_update": true,
         "destroy": true
@@ -4154,7 +4154,8 @@
       ],
       "actions": [],
       "notes": [
-        "Read-only in practice: POST cannot work because `enrollment` is read-only on the serializer."
+        "Read-only in practice: POST cannot work because `enrollment` is read-only on the serializer, so there is no create_installment tool.",
+        "Installments are created only through create_enrollment: pass installments_count (and optionally installment_amount) and the server builds the schedule. Existing rows are then updated in place (paid_amount, status, paid_date) with update_installment."
       ]
     },
     {

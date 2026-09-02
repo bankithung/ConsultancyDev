@@ -102,6 +102,22 @@ class CatalogBuildTests(SimpleTestCase):
             'update': False, 'partial_update': False, 'destroy': False,
         })
 
+    def test_installments_cannot_be_created(self):
+        # InstallmentSerializer marks `enrollment` read-only, so a POST can
+        # never name its parent and the unique (enrollment, number) constraint
+        # answers 409. The verb is switched off at the source so no
+        # create_installment tool is ever generated; schedules come from
+        # create_enrollment's installments_count.
+        installments = self.by_prefix['installments']
+        self.assertFalse(installments['verbs']['create'])
+        self.assertTrue(installments['verbs']['list'])
+        self.assertTrue(installments['verbs']['partial_update'])
+        enrollment = next(f for f in installments['fields'] if f['name'] == 'enrollment')
+        self.assertTrue(enrollment['read_only'], 'the override exists because this field is read-only')
+        notes = ' '.join(installments['notes'])
+        self.assertIn('create_enrollment', notes)
+        self.assertIn('installments_count', notes)
+
     def test_companies_notes_record_the_admin_only_is_active(self):
         # The catalog probes as an anonymous caller, so CompanyViewSet hands it
         # CompanyProfileSerializer and `is_active` comes back read-only. Without

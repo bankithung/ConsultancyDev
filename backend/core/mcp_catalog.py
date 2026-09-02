@@ -216,7 +216,13 @@ RESOURCE_NOTES = {
         'that sum exactly to total_fees, due monthly from start_date. Never build schedules client-side.',
         'student must be a Registration id in the caller\'s company; university may be a shared (company=null) row.',
     ],
-    'installments': ['Read-only in practice: POST cannot work because `enrollment` is read-only on the serializer.'],
+    'installments': [
+        'Read-only in practice: POST cannot work because `enrollment` is read-only on the serializer, '
+        'so there is no create_installment tool.',
+        'Installments are created only through create_enrollment: pass installments_count (and optionally '
+        'installment_amount) and the server builds the schedule. Existing rows are then updated in place '
+        '(paid_amount, status, paid_date) with update_installment.',
+    ],
     'payments': ['Only status Success counts as revenue. metadata is a free JSON object for method detail.'],
     'documents': [
         'Uploads are multipart/form-data with a write-only `file` field; JSON is accepted for metadata-only writes.',
@@ -449,9 +455,22 @@ def _methods(viewset_class):
     return verbs
 
 
-def _verbs(viewset_class):
+# prefix -> {verb: False} for routes that exist but cannot succeed.
+#
+# installments/ is a full ModelViewSet, so `create` is routed — but
+# InstallmentSerializer marks `enrollment` read-only, so a POST cannot name
+# its parent enrollment and the (enrollment, number) uniqueness check answers
+# 409 every time. A create_installment tool would be a permanent dead end, so
+# the verb is switched off here rather than papered over downstream.
+# Schedules are built by create_enrollment's installments_count.
+VERB_OVERRIDES = {
+    'installments': {'create': False},
+}
+
+
+def _verbs(prefix, viewset_class):
     """
-    Which of the six actions the viewset actually defines.
+    Which of the six actions the viewset actually defines and can serve.
 
     `methods` collapses list and retrieve into a single GET and so cannot say
     "lists, but has no detail route" — which is exactly ApiKeyViewSet, a
@@ -459,8 +478,13 @@ def _verbs(viewset_class):
     reading GET alone emits a get_api_key tool pointing at a URL the router
     never built. Read this rather than `methods` when deciding which tools to
     emit; `methods` stays the HTTP-verb summary.
+
+    VERB_OVERRIDES then removes the verbs a viewset routes but its serializer
+    makes unusable.
     """
-    return {name: hasattr(viewset_class, name) for name in VERB_HANDLERS}
+    verbs = {name: hasattr(viewset_class, name) for name in VERB_HANDLERS}
+    verbs.update(VERB_OVERRIDES.get(prefix, {}))
+    return verbs
 
 
 # Permission classes that only establish "authenticated, active and scoped to
@@ -540,7 +564,7 @@ def _resource(prefix, viewset_class):
         'model': model.__name__ if model is not None else None,
         'entity_type': getattr(viewset_class, 'entity_type', None),
         'methods': _methods(viewset_class),
-        'verbs': _verbs(viewset_class),
+        'verbs': _verbs(prefix, viewset_class),
         'list_paginated': getattr(viewset_class, 'pagination_class', 'default') is not None,
         'permission_classes': names,
         'read_capability': read_cap,
