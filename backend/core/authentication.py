@@ -47,7 +47,7 @@ class ApiKeyAuthentication(authentication.BaseAuthentication):
         if not key.is_valid:
             raise exceptions.AuthenticationFailed('This API key has been revoked or has expired.')
         user = key.user
-        if not user.is_active or not getattr(user, 'is_active_employee', True):
+        if not user.is_active or not user.is_active_employee:
             raise exceptions.AuthenticationFailed('This account is not active.')
         now = timezone.now()
         if key.last_used_at is None or now - key.last_used_at > LAST_USED_STAMP_INTERVAL:
