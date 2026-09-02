@@ -55,6 +55,9 @@ def validate_payload(catalog: Catalog, resource_name: str, data: Any, partial: b
     """
     Drop read-only fields, reject unknown ones, require required ones on create.
 
+    "Required" is presence, except for a write-only string, where a blank value
+    counts as missing too — see _blank_write_only.
+
     Read-only fields are dropped rather than refused: an AI client that echoes
     a record back with an edit would otherwise be stuck, since every row it
     reads carries id/company/owner/created_at. What was dropped is returned
@@ -75,11 +78,37 @@ def validate_payload(catalog: Catalog, resource_name: str, data: Any, partial: b
     stripped = sorted(k for k in data if fields[k]['read_only'])
     if not partial:
         missing = sorted(n for n, f in fields.items() if f['required'] and n not in cleaned)
-        if missing:
-            raise ToolError(f'Missing required field(s) for {resource_name}: {", ".join(missing)}.')
+        blank = sorted(n for n, f in fields.items()
+                       if f['required'] and n in cleaned and _blank_write_only(f, cleaned[n]))
+        if missing or blank:
+            hint = (f' A blank string is not a value: {", ".join(blank)} must carry real content.'
+                    if blank else '')
+            raise ToolError(f'Missing required field(s) for {resource_name}: '
+                            f'{", ".join(sorted(missing + blank))}.{hint}')
     if stripped:
         cleaned['_stripped'] = stripped
     return cleaned
+
+
+def _blank_write_only(field: dict, value: Any) -> bool:
+    """
+    Whether a required WRITE-ONLY string arrived empty, which counts as missing.
+
+    Requiring `password` is what stops create_user making an account nobody
+    can log into, and presence alone does not achieve that. The API declares
+    the field allow_blank, skips its validators for a falsy value and falls
+    back to set_unusable_password(), so {"password": ""} produces exactly the
+    record the requirement exists to prevent: a 201, a consumed company seat
+    and a dead account. A client told a string field is required, with no value
+    to put there, sends "" readily.
+
+    Narrow on two counts, both deliberate. Only write-only fields, because
+    their value never comes back in the response, so a caller cannot see that
+    it was ignored. And only strings, so an integer or a decimal is untouched.
+    A blank on an ordinary required field stays the API's business: it answers
+    400 with a message about that field, which beats anything guessed here.
+    """
+    return bool(field['write_only']) and isinstance(value, str) and not value.strip()
 
 
 def validate_filters(catalog: Catalog, resource_name: str, filters: dict | None) -> dict:

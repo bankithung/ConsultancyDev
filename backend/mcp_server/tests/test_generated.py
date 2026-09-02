@@ -19,6 +19,10 @@ from .base import CATALOG, McpTestCase
 
 User = get_user_model()
 
+# A tab and a newline: whitespace that is not a space, spelled out so the
+# literal survives an editor that trims trailing whitespace.
+BLANKS_TAB_NEWLINE = chr(9) + chr(10)
+
 
 def _expected_names(catalog, read_only=False):
     """Every tool name the catalog says the generator owes, from `verbs`."""
@@ -67,6 +71,36 @@ class ValidatePayloadTests(SimpleTestCase):
         cleaned = validate_payload(CATALOG, 'enquiries', {'candidate_name': 'x', 'company': 9}, partial=True)
         self.assertNotIn('company', cleaned)
         self.assertEqual(cleaned['_stripped'], ['company'])
+
+    def test_a_blank_required_write_only_field_counts_as_missing(self):
+        """
+        `password` is required so create_user cannot make an account nobody
+        can log into. Presence alone does not achieve that: the API declares
+        the field allow_blank and falls back to set_unusable_password() for
+        anything falsy, so "" would produce exactly the record the requirement
+        exists to prevent.
+        """
+        for blank in ('', '   ', BLANKS_TAB_NEWLINE):
+            with self.subTest(password=repr(blank)):
+                with self.assertRaises(ToolError) as ctx:
+                    validate_payload(CATALOG, 'users', {'username': 'x', 'password': blank}, partial=False)
+                message = str(ctx.exception)
+                self.assertIn('Missing required field', message)
+                self.assertIn('password', message)
+                self.assertIn('blank string', message)
+
+    def test_only_write_only_strings_are_judged_on_their_value(self):
+        """
+        Narrow on purpose. A blank on an ordinary required field is the API's
+        business — it answers 400 with its own message, which is more accurate
+        than anything guessed here — and the rule is create-only, so an update
+        is untouched.
+        """
+        cleaned = validate_payload(CATALOG, 'users',
+                                   {'username': '', 'password': 'Real!2026xyz'}, partial=False)
+        self.assertEqual(cleaned['username'], '')
+        self.assertEqual(validate_payload(CATALOG, 'users', {'password': ''}, partial=True),
+                         {'password': ''})
 
     def test_a_non_object_payload_is_refused(self):
         with self.assertRaises(ToolError) as ctx:
@@ -386,6 +420,25 @@ class CallerDependentSerializerTests(McpTestCase):
         self.assertIn('password', text)
         self.assertFalse(User.objects.filter(username='nopass').exists())
         self.assertEqual(User.objects.count(), before)
+
+    def test_create_user_with_a_blank_password_is_refused_and_creates_nothing(self):
+        """
+        The same defect as an absent password, through an input an AI client
+        told "password is required" with nothing to put there is quite likely
+        to send.
+        """
+        for index, blank in enumerate(('', '   ', BLANKS_TAB_NEWLINE)):
+            with self.subTest(password=repr(blank)):
+                before = User.objects.count()
+                text = self.call_raises('create_user', self.admin, data={
+                    'username': f'blank{index}', 'email': f'blank{index}@example.com',
+                    'role': 'EMPLOYEE', 'branch': self.kohima.pk, 'password': blank,
+                })
+                self.assertIn('Missing required field', text)
+                self.assertIn('password', text)
+                self.assertIn('blank string', text)
+                self.assertFalse(User.objects.filter(username=f'blank{index}').exists())
+                self.assertEqual(User.objects.count(), before)
 
     def test_update_user_role_and_branch_work_for_a_company_admin(self):
         updated = self.call('update_user', self.admin, id=self.emp_k1.pk,
