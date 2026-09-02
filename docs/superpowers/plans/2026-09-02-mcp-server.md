@@ -23,7 +23,7 @@
 - Tests must set `os.environ.setdefault('DJANGO_ALLOW_ASYNC_UNSAFE', 'true')` before driving the MCP server in-process, because FastMCP runs tool functions inside an event loop while the Django test transport uses the ORM synchronously.
 - Commit after every task from the inner repo root `C:\Users\Asus\Music\Projects\ConsultancyDev\ConsultancyDev`, with the trailer `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 - Pinned versions: `mcp==1.26.0`, `httpx==0.28.1` (both already installed locally; `pip show mcp httpx` confirms).
-- The catalog file `backend/mcp_server/catalog.json` is generated and **committed**; `core/test_mcp_catalog.py` fails when it is stale.
+- The catalog file `backend/mcp_server/catalog.json` is generated and **committed**; `core/test_mcp_catalog.py` fails when it is stale. Generate it with the default upload settings (no `MAX_DOCUMENT_SIZE_BYTES` / `ALLOWED_DOCUMENT_EXTENSIONS` overrides in `.env`), because those values are embedded in `conventions.uploads`.
 
 ### File map (what each file owns)
 
@@ -713,7 +713,7 @@ Check the original function's final line (`return revoked` or nothing) and keep 
 - [ ] **Step 7: Run tests**
 
 Run: `cd backend && python manage.py test core.test_api_keys`
-Expected: `Ran 13 tests ... OK`
+Expected: `Ran 12 tests ... OK`
 
 Run: `cd backend && python manage.py test core.test_authorization core.tests.AuthLifecycleTests`
 Expected: OK (JWT paths unchanged).
@@ -1006,7 +1006,7 @@ Open `backend/core/test_authorization.py` and find the `UNGOVERNED` dict (line ~
 - [ ] **Step 7: Run tests**
 
 Run: `cd backend && python manage.py test core.test_api_keys core.test_authorization`
-Expected: OK (24 api-key tests + the authorization suite).
+Expected: OK (23 api-key tests + the authorization suite).
 
 - [ ] **Step 8: Commit**
 
@@ -1726,7 +1726,10 @@ def _roles():
 
 
 def _conventions():
-    rates = settings.REST_FRAMEWORK.get('DEFAULT_THROTTLE_RATES', {})
+    # Production rates, not the DEBUG-relaxed ones, so the committed catalog
+    # does not depend on the generating machine's .env.
+    from config.settings import _throttle_rates
+    rates = _throttle_rates(False)
     return {
         'base_path': '/api/',
         'trailing_slash_required': True,
@@ -3565,7 +3568,7 @@ def _register_action(mcp: FastMCP, state: ServerState, r: dict, action: dict, re
 - [ ] **Step 4: Run tests**
 
 Run: `cd backend && python manage.py test mcp_server.tests.test_generated mcp_server.tests.test_server`
-Expected: `test_generated` OK (14 tests). In `test_server`, `test_api_error_is_tool_error_with_hint` and `test_read_only_mode_hides_write_tools` now pass; `test_tools_resources_prompts_are_registered` still fails on `analytics_overview` (Task 8).
+Expected: `test_generated` OK (15 tests). In `test_server`, `test_api_error_is_tool_error_with_hint` and `test_read_only_mode_hides_write_tools` now pass; `test_tools_resources_prompts_are_registered` still fails on `analytics_overview` (Task 8).
 
 If FastMCP rejects the `_r=r` default-argument trick because it appears in the tool schema, move to closures: wrap each `def` inside a factory `def make(_r): def tool(...): ...; return tool` and drop the `_r` parameter. FastMCP builds the input schema from the signature, so any extra parameter must be removed from the signature; the factory form is the safe choice.
 
