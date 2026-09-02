@@ -153,3 +153,107 @@ class ApiKeyAuthenticationTests(TestCase):
         _, raw = ApiKey.issue(self.emp, 'k')
         response = self.client_with(raw).get('/api/enquiries/')
         self.assertEqual(response.data['count'], 0)
+
+
+@override_settings(REST_FRAMEWORK=RF)
+class ApiKeyEndpointTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        services.ensure_default_plans()
+        cls.company, cls.head_office = services.provision_company('Acme Consultancy')
+        cls.rival, cls.rival_branch = services.provision_company('Rival Consultancy')
+        cls.emp = mk('emp', Role.EMPLOYEE, cls.company, cls.head_office)
+        cls.emp2 = mk('emp2', Role.EMPLOYEE, cls.company, cls.head_office)
+        cls.admin = mk('admin', Role.COMPANY_ADMIN, cls.company, cls.head_office)
+        cls.rival_admin = mk('rival_admin', Role.COMPANY_ADMIN, cls.rival, cls.rival_branch)
+        cls.dev = mk('dev', Role.DEV_ADMIN, None, None)
+
+    def setUp(self):
+        cache.clear()
+
+    def auth(self, user):
+        client = APIClient()
+        response = client.post('/api/auth/login/', {'username': user.username, 'password': PASSWORD}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        client.credentials(HTTP_AUTHORIZATION=f'Bearer {response.data["access"]}')
+        return client
+
+    def test_create_returns_plaintext_once(self):
+        client = self.auth(self.emp)
+        response = client.post('/api/api-keys/', {'name': 'Claude Desktop'}, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(response.data['key'].startswith('cdk_'))
+        self.assertEqual(response.data['prefix'], response.data['key'][:12])
+        self.assertNotIn('key_hash', response.data)
+        listed = client.get('/api/api-keys/')
+        self.assertEqual(listed.data['count'], 1)
+        self.assertNotIn('key', listed.data['results'][0])
+        self.assertNotIn('key_hash', listed.data['results'][0])
+
+    def test_name_is_required(self):
+        response = self.auth(self.emp).post('/api/api-keys/', {}, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('name', response.data['fields'])
+
+    def test_expires_at_in_the_past_is_rejected(self):
+        past = (timezone.now() - timedelta(days=1)).isoformat()
+        response = self.auth(self.emp).post('/api/api-keys/', {'name': 'x', 'expires_at': past}, format='json')
+        self.assertEqual(response.status_code, 400)
+
+    def test_users_only_see_their_own_keys(self):
+        ApiKey.issue(self.emp2, 'other')
+        response = self.auth(self.emp).get('/api/api-keys/')
+        self.assertEqual(response.data['count'], 0)
+
+    def test_employee_cannot_list_another_users_keys(self):
+        ApiKey.issue(self.emp2, 'other')
+        response = self.auth(self.emp).get(f'/api/api-keys/?user={self.emp2.pk}')
+        self.assertEqual(response.status_code, 403)
+
+    def test_company_admin_can_list_and_revoke_staff_keys(self):
+        key, _ = ApiKey.issue(self.emp, 'k')
+        client = self.auth(self.admin)
+        response = client.get(f'/api/api-keys/?user={self.emp.pk}')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+        revoked = client.post(f'/api/api-keys/{key.pk}/revoke/')
+        self.assertEqual(revoked.status_code, 200, revoked.data)
+        key.refresh_from_db()
+        self.assertIsNotNone(key.revoked_at)
+
+    def test_company_admin_cannot_reach_other_tenant(self):
+        key, _ = ApiKey.issue(self.rival_admin, 'k')
+        client = self.auth(self.admin)
+        self.assertEqual(client.get(f'/api/api-keys/?user={self.rival_admin.pk}').status_code, 403)
+        self.assertEqual(client.post(f'/api/api-keys/{key.pk}/revoke/').status_code, 404)
+
+    def test_dev_admin_can_list_any_user(self):
+        ApiKey.issue(self.rival_admin, 'k')
+        response = self.auth(self.dev).get(f'/api/api-keys/?user={self.rival_admin.pk}')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+
+    def test_revoke_own_key_stops_it_working(self):
+        client = self.auth(self.emp)
+        created = client.post('/api/api-keys/', {'name': 'k'}, format='json')
+        raw = created.data['key']
+        keyed = APIClient()
+        keyed.credentials(HTTP_AUTHORIZATION=f'Bearer {raw}')
+        self.assertEqual(keyed.get('/api/users/me/').status_code, 200)
+        self.assertEqual(client.post(f'/api/api-keys/{created.data["id"]}/revoke/').status_code, 200)
+        self.assertEqual(keyed.get('/api/users/me/').status_code, 401)
+
+    def test_revoke_twice_is_idempotent(self):
+        client = self.auth(self.emp)
+        created = client.post('/api/api-keys/', {'name': 'k'}, format='json')
+        url = f'/api/api-keys/{created.data["id"]}/revoke/'
+        self.assertEqual(client.post(url).status_code, 200)
+        self.assertEqual(client.post(url).status_code, 200)
+
+    def test_api_key_cannot_mint_or_manage_keys(self):
+        """A leaked key must not be able to create a replacement for itself."""
+        _, raw = ApiKey.issue(self.emp, 'k')
+        keyed = APIClient()
+        keyed.credentials(HTTP_AUTHORIZATION=f'Bearer {raw}')
+        self.assertEqual(keyed.post('/api/api-keys/', {'name': 'clone'}, format='json').status_code, 403)
+        self.assertEqual(keyed.get('/api/api-keys/').status_code, 403)

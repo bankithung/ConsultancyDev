@@ -4,7 +4,8 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import analytics
 from .views import (
-    AgentViewSet, AppointmentViewSet, ApprovalRequestViewSet, BranchViewSet,
+    AgentViewSet, ApiKeyViewSet, AppointmentViewSet, ApprovalRequestViewSet,
+    BranchViewSet,
     CommissionViewSet, CompanyViewSet, DocumentViewSet, EnquiryViewSet,
     FollowUpCommentViewSet,
     EnrollmentViewSet, FollowUpViewSet, HealthView, InstallmentViewSet,
@@ -27,6 +28,7 @@ router.register(r'subscriptions', SubscriptionViewSet, basename='subscription')
 
 # People
 router.register(r'users', UserViewSet, basename='user')
+router.register(r'api-keys', ApiKeyViewSet, basename='apikey')
 
 # CRM
 router.register(r'enquiries', EnquiryViewSet, basename='enquiry')

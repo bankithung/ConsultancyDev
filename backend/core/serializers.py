@@ -20,7 +20,7 @@ from rest_framework.validators import UniqueTogetherValidator
 
 from . import capabilities
 from .models import (
-    Agent, Appointment, ApprovalRequest, Branch, Capability, Commission,
+    Agent, ApiKey, Appointment, ApprovalRequest, Branch, Capability, Commission,
     Company, Document,
     Enquiry, Enrollment, FollowUp, FollowUpComment, Installment,
     Notification,
@@ -1142,4 +1142,31 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
         return attrs
 
 
+# ===========================================================================
+#  Personal API keys
+# ===========================================================================
 
+class ApiKeySerializer(serializers.ModelSerializer):
+    """Read shape. Never includes the hash; the plaintext exists only in the create response."""
+
+    is_valid = serializers.BooleanField(read_only=True)
+    user_name = serializers.CharField(source='user.username', read_only=True)
+
+    class Meta:
+        model = ApiKey
+        fields = (
+            'id', 'user', 'user_name', 'name', 'prefix', 'created_at', 'last_used_at',
+            'expires_at', 'revoked_at', 'is_valid',
+        )
+        read_only_fields = fields
+
+
+class ApiKeyCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=80)
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+
+    def validate_expires_at(self, value):
+        from django.utils import timezone
+        if value is not None and value <= timezone.now():
+            raise serializers.ValidationError('Expiry must be in the future.')
+        return value

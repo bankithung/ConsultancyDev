@@ -35,7 +35,7 @@ from .filters import (
     PaymentFilter, RefundFilter, RegistrationFilter,
 )
 from .models import (
-    Agent, Appointment, ApprovalRequest, Branch, Capability, Commission,
+    Agent, ApiKey, Appointment, ApprovalRequest, Branch, Capability, Commission,
     Company, Document,
     Enquiry, Enrollment, FollowUp, FollowUpComment, Installment,
     Notification,
@@ -54,7 +54,8 @@ from .permissions import (
     branch_ids_for, can_write_object, scope_queryset,
 )
 from .serializers import (
-    AgentSerializer, AppointmentSerializer, ApprovalRequestSerializer,
+    AgentSerializer, ApiKeyCreateSerializer, ApiKeySerializer,
+    AppointmentSerializer, ApprovalRequestSerializer,
     BranchSerializer, ChangePasswordSerializer, CommissionSerializer,
     CompanyProfileSerializer, CompanySerializer, DocumentSerializer,
     EnquirySerializer,
@@ -1634,6 +1635,92 @@ class RolePermissionView(APIView):
             company.pk, request.user.username, removed,
         )
         return Response(self._payload(request, company))
+
+
+# ===========================================================================
+#  Personal API keys
+# ===========================================================================
+
+class ApiKeyViewSet(viewsets.GenericViewSet):
+    """
+    List, mint and revoke personal API keys.
+
+    Three rules:
+      * A key is only ever created for the CALLER. There is no "create a key
+        for user X" — an admin who wants to act as a user asks them for a key.
+      * A session authenticated BY an API key cannot manage keys at all, so a
+        leaked key cannot mint a longer-lived replacement for itself.
+      * `?user=<id>` lists (and `revoke` reaches) another user's keys only for
+        company admins inside their own company and for dev admins.
+    """
+
+    serializer_class = ApiKeySerializer
+    permission_classes = [IsAuthenticatedAndActive]
+    ordering_fields = ('created_at', 'name', 'last_used_at')
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if isinstance(getattr(request, 'auth', None), ApiKey):
+            raise PermissionDenied('API keys cannot be managed with an API key. Sign in with your password.')
+
+    def _target_user(self):
+        """The user whose keys the caller is asking about, after the scope check."""
+        request = self.request
+        raw = request.query_params.get('user')
+        if not raw:
+            return request.user
+        try:
+            target_id = int(raw)
+        except (TypeError, ValueError):
+            raise ValidationError({'user': 'user must be a number.'})
+        if target_id == request.user.id:
+            return request.user
+        if request.user.is_dev_admin:
+            return User.objects.filter(pk=target_id).first() or request.user
+        if request.user.is_company_admin:
+            target = User.objects.filter(pk=target_id, company_id=request.user.company_id).first()
+            if target is None:
+                raise PermissionDenied('That user is not in your company.')
+            return target
+        raise PermissionDenied('You can only see your own API keys.')
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = ApiKey.objects.select_related('user')
+        if self.action == 'list':
+            return qs.filter(user=self._target_user())
+        # Detail actions: own keys, plus company staff for admins, everything for dev admins.
+        if user.is_dev_admin:
+            return qs
+        if user.is_company_admin:
+            return qs.filter(user__company_id=user.company_id)
+        return qs.filter(user=user)
+
+    def list(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            return self.get_paginated_response(self.get_serializer(page, many=True).data)
+        return Response(self.get_serializer(qs, many=True).data)
+
+    def create(self, request):
+        serializer = ApiKeyCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        key, raw = ApiKey.issue(
+            request.user, serializer.validated_data['name'],
+            expires_at=serializer.validated_data.get('expires_at'),
+        )
+        security_log.info('API key %s created by %s', key.prefix, request.user.username)
+        data = ApiKeySerializer(key).data
+        data['key'] = raw
+        return Response(data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def revoke(self, request, pk=None):
+        key = self.get_object()
+        key.revoke()
+        security_log.info('API key %s revoked by %s', key.prefix, request.user.username)
+        return Response(ApiKeySerializer(key).data)
 
 
 # ===========================================================================

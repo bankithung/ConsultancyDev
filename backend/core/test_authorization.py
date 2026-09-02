@@ -247,6 +247,10 @@ UNGOVERNED = {
         'Every role must be able to RAISE one — it is the employee\'s route to '
         'a delete. Review is gated separately by _require_reviewer.'
     ),
+    'api-keys': (
+        'Own keys only; a company admin may list and revoke staff keys via '
+        '?user=. Covered end to end by core.test_api_keys.'
+    ),
 }
 
 # The shared CRM rule: any active user may read and create within their own
