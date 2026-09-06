@@ -538,7 +538,7 @@ function TransfersScreen() {
   }));
 
   return (
-    <div className="mx-auto max-w-[1400px] pt-1">
+    <div className="pt-1">
       <BookmarkTabs tabs={tabs} value={direction} onChange={setDirection} aria-label="Transfer direction" />
 
       {/*

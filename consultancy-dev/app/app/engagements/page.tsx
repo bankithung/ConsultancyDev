@@ -319,7 +319,7 @@ function EngagementsScreen() {
   }));
 
   return (
-    <div className="mx-auto max-w-[1400px] px-3 pt-1 sm:px-6">
+    <div className="pt-1">
       <BookmarkTabs tabs={tabs} value={tab} onChange={setTab} aria-label="Engagement view" />
 
       {/*

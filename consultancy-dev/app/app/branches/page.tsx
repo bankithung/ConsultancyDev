@@ -108,7 +108,7 @@ function BranchesPage() {
   const isSearching = search.trim() !== '';
 
   return (
-    <div className="mx-auto max-w-[1400px] px-3 pt-1 sm:px-6">
+    <div className="pt-1">
       {/*
         No visible title. `AppShell` already puts "Branches" in the topbar —
         Topbar.tsx has no entry for this route, so its fallback derives the name

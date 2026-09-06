@@ -24,7 +24,6 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
-  DollarSign,
   Building2,
   ArrowLeftRight,
   GitBranch,
@@ -173,7 +172,6 @@ const NAV_SECTIONS: NavSection[] = [
       // under it, so /app/settings/permissions would light Settings too.
       { label: 'Permissions', href: '/app/permissions', icon: ShieldCheck, roles: ADMINS },
       { label: 'Approvals', href: '/app/approval-requests', icon: CheckSquare, roles: [...ADMINS, ROLES.HEAD_MANAGER] },
-      { label: 'Commissions', href: '/app/commissions', icon: DollarSign, roles: ADMINS },
       { label: 'Settings', href: '/app/settings', icon: Settings, roles: ADMINS },
     ],
   },

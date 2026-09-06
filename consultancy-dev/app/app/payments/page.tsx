@@ -813,7 +813,7 @@ function PaymentsScreen() {
   ];
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-3 px-3 py-2 sm:px-6 lg:px-8">
+    <div className="space-y-3 pt-1">
       {/* Stats — every figure is a server aggregate over the caller's full
           scope. The two refund-derived tiles are replaced rather than blanked
           for a role that may not read refunds: a "Refunded ₹0" tile would be a
