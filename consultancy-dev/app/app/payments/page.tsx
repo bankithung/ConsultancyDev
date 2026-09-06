@@ -23,7 +23,7 @@ import type { Payment, PaymentStatus, Refund, RefundStatus } from '@/lib/types';
 import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
 import { useDebounce } from '@/hooks/useDebounce';
 import { PaginationBar } from '@/components/common/PaginationBar';
-import { EmptyState, ErrorState, InlineSpinner, LoadingState } from '@/components/common/states';
+import { ErrorState, InlineSpinner, LoadingState } from '@/components/common/states';
 import { PaymentModal } from '@/components/common/PaymentModal';
 import { PaymentDetailsModal } from '@/components/common/PaymentDetailsModal';
 import { RefundDrawer } from '@/components/common/RefundDrawer';
@@ -39,7 +39,6 @@ import { useCurrentRole } from '@/components/rbac/useCurrentRole';
 import { DataTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -813,18 +812,19 @@ function PaymentsScreen() {
   ];
 
   return (
-    <div className="space-y-3 pt-1">
+    <div className="pt-1">
+      <section aria-label="Payments and refunds" className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       {/* Stats — every figure is a server aggregate over the caller's full
           scope. The two refund-derived tiles are replaced rather than blanked
           for a role that may not read refunds: a "Refunded ₹0" tile would be a
           claim, not a redaction. */}
       <div
         className={cn(
-          'grid grid-cols-2 gap-2 sm:gap-4',
+          'grid grid-cols-2 divide-x divide-slate-200 border-b border-slate-200 bg-slate-50/60',
           canManageRefunds ? 'md:grid-cols-4' : 'md:grid-cols-3'
         )}
       >
-        <StatCard
+        <PaymentMetric
           accent="bg-emerald-500"
           label="Total Revenue"
           value={rupees(revenue)}
@@ -833,29 +833,29 @@ function PaymentsScreen() {
               ? `${successCount.data.toLocaleString('en-IN')} settled`
               : 'Settled payments'
           }
-          noteClass="text-emerald-600 bg-emerald-50"
+
           loading={totals.isLoading}
         />
         {canManageRefunds ? (
-          <StatCard
+          <PaymentMetric
             accent="bg-blue-500"
             label="Net Income"
             value={rupees(revenue - refunded)}
             note="After processed refunds"
-            noteClass="text-blue-600 bg-blue-50"
+
             loading={totals.isLoading || refundTotals.isLoading}
           />
         ) : (
-          <StatCard
+          <PaymentMetric
             accent="bg-blue-500"
             label="This Month"
             value={rupees(totals.data?.thisMonthRevenue ?? 0)}
             note="Settled this month"
-            noteClass="text-blue-600 bg-blue-50"
+
             loading={totals.isLoading}
           />
         )}
-        <StatCard
+        <PaymentMetric
           accent="bg-amber-500"
           label="Outstanding"
           value={rupees(totals.data?.pendingAmount ?? 0)}
@@ -864,11 +864,11 @@ function PaymentsScreen() {
               ? `${pendingCount.data.toLocaleString('en-IN')} pending`
               : 'Pending payments'
           }
-          noteClass="text-amber-600 bg-amber-50"
+
           loading={totals.isLoading}
         />
         {canManageRefunds && (
-          <StatCard
+          <PaymentMetric
             accent="bg-rose-500"
             label="Refunded"
             value={rupees(refunded)}
@@ -881,7 +881,7 @@ function PaymentsScreen() {
                   }`
                 : 'Processed refunds'
             }
-            noteClass="text-rose-600 bg-rose-50"
+
             loading={refundTotals.isLoading}
           />
         )}
@@ -895,7 +895,7 @@ function PaymentsScreen() {
         />
       )}
       {refundTotals.data?.truncated && (
-        <p className="text-[11px] text-slate-400">
+        <p className="px-3 py-2 text-[11px] text-slate-400">
           The refunded total covers the {SCAN_PAGE_SIZE * SCAN_MAX_PAGES} most recent processed
           refunds of {refundTotals.data.processedCount.toLocaleString('en-IN')}.
         </p>
@@ -910,7 +910,7 @@ function PaymentsScreen() {
           }
         }}
       >
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-3">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
             <TabsList className="shrink-0 rounded-lg border border-slate-200 bg-slate-100 p-1">
               <TabsTrigger
@@ -973,6 +973,7 @@ function PaymentsScreen() {
                   variant="outline"
                   size="sm"
                   disabled={isExporting}
+                  aria-label="Export records"
                   className="h-9 border-slate-200 bg-white text-xs font-medium hover:bg-slate-50"
                 >
                   {isExporting ? (
@@ -1011,8 +1012,8 @@ function PaymentsScreen() {
                 size="sm"
                 className="h-9 bg-teal-600 text-xs font-semibold text-white shadow-sm hover:bg-teal-700"
               >
-                <Plus className="h-3.5 w-3.5 sm:mr-2" />
-                <span className="hidden sm:inline">Record payment</span>
+                <Plus className="mr-2 h-3.5 w-3.5" />
+                <span>Record payment</span>
               </Button>
             ) : (
               <Button
@@ -1020,8 +1021,8 @@ function PaymentsScreen() {
                 size="sm"
                 className="h-9 bg-teal-600 text-xs font-semibold text-white shadow-sm hover:bg-teal-700"
               >
-                <RotateCcw className="h-3.5 w-3.5 sm:mr-2" />
-                <span className="hidden sm:inline">Create refund</span>
+                <RotateCcw className="mr-2 h-3.5 w-3.5" />
+                <span>Create refund</span>
               </Button>
             )}
           </div>
@@ -1030,7 +1031,7 @@ function PaymentsScreen() {
         {/* Applied filters. Pressing a chip reopens the drawer at that group;
             the × drops the whole category. */}
         {chips.length > 0 && (
-          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 bg-slate-50/70 px-3 py-2">
             {chips.map((chip) => (
               <span
                 key={chip.param}
@@ -1078,20 +1079,7 @@ function PaymentsScreen() {
                 ? 'Try a different search term, or clear the filters.'
                 : 'Record a payment to see it here.'
             }
-            emptyAction={
-              hasQuery ? (
-                <Button variant="outline" onClick={clearAll}>
-                  Clear filters
-                </Button>
-              ) : (
-                <Button
-                  className="bg-teal-600 hover:bg-teal-700"
-                  onClick={() => setIsPaymentModalOpen(true)}
-                >
-                  <Plus className="mr-2 h-4 w-4" /> Record payment
-                </Button>
-              )
-            }
+            emptyAction={hasQuery ? <Button variant="outline" size="sm" onClick={clearAll}>Clear filters</Button> : undefined}
           >
             <DataTable columns={transactionColumns} data={payments.rows} />
             <PaginationBar
@@ -1119,20 +1107,7 @@ function PaymentsScreen() {
                   ? 'Try a different search term or status.'
                   : 'Refund requests you raise will be listed here.'
               }
-              emptyAction={
-                hasQuery ? (
-                  <Button variant="outline" onClick={clearAll}>
-                    Clear filters
-                  </Button>
-                ) : (
-                  <Button
-                    className="bg-teal-600 hover:bg-teal-700"
-                    onClick={() => setIsCreateRefundOpen(true)}
-                  >
-                    <RotateCcw className="mr-2 h-4 w-4" /> Create refund
-                  </Button>
-                )
-              }
+              emptyAction={hasQuery ? <Button variant="outline" size="sm" onClick={clearAll}>Clear filters</Button> : undefined}
             >
               <DataTable columns={refundColumns} data={refunds.rows} />
               <PaginationBar
@@ -1147,6 +1122,7 @@ function PaymentsScreen() {
           </TabsContent>
         )}
       </Tabs>
+      </section>
 
       <FilterDrawer
         open={isFilterOpen}
@@ -1283,34 +1259,31 @@ export default function PaymentsPage() {
 /* Presentational                                                             */
 /* -------------------------------------------------------------------------- */
 
-function StatCard({
+function PaymentMetric({
   accent,
   label,
   value,
   note,
-  noteClass,
   loading,
 }: {
   accent: string;
   label: string;
   value: string;
   note: string;
-  noteClass: string;
   loading: boolean;
 }) {
   return (
-    <Card className="group overflow-hidden border-slate-200 bg-white shadow-sm transition-all duration-200 hover:shadow-md">
-      <div className={cn('h-1 w-full', accent)} />
-      <CardContent className="p-3 sm:p-4">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</p>
-        <h4 className="mt-1 text-lg font-bold text-slate-900 sm:text-2xl">
+    <div className="min-w-0 px-3 py-3 sm:px-4">
+      <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+        <span aria-hidden="true" className={cn('h-1.5 w-1.5 shrink-0 rounded-full', accent)} />{label}
+      </p>
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <p className="break-all text-lg font-semibold leading-6 tabular-nums text-slate-900">
           {loading ? <span className="text-slate-300">—</span> : value}
-        </h4>
-        <div className={cn('mt-3 w-fit rounded-full px-2 py-0.5 text-[10px] font-medium', noteClass)}>
-          {note}
-        </div>
-      </CardContent>
-    </Card>
+        </p>
+        <p className="text-[10px] leading-4 text-slate-500">{note}</p>
+      </div>
+    </div>
   );
 }
 
@@ -1337,9 +1310,9 @@ function ListPanel({
 }) {
   if (isLoading) {
     return (
-      <Card className="border-slate-200 bg-white p-4 shadow-sm">
+      <div className="p-4">
         <LoadingState rows={5} label="Loading records…" />
-      </Card>
+      </div>
     );
   }
 
@@ -1349,14 +1322,14 @@ function ListPanel({
 
   if (isEmpty) {
     return (
-      <EmptyState
-        title={emptyTitle}
-        description={emptyDescription}
-        icon={FileText}
-        action={emptyAction}
-      />
+      <div className="flex min-h-48 flex-col items-center justify-center gap-2 px-4 py-8 text-center">
+        <FileText className="mb-1 h-6 w-6 text-slate-300" aria-hidden="true" />
+        <h3 className="text-sm font-medium text-slate-700">{emptyTitle}</h3>
+        <p className="text-xs text-slate-500">{emptyDescription}</p>
+        {emptyAction && <div className="mt-2">{emptyAction}</div>}
+      </div>
     );
   }
 
-  return <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">{children}</Card>;
+  return <div className="overflow-hidden">{children}</div>;
 }
