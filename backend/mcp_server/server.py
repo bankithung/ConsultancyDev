@@ -130,14 +130,35 @@ def build_server(settings: Settings, transport: Transport | None = None,
 class BearerRequiredMiddleware(BaseHTTPMiddleware):
     """Reject MCP traffic without a bearer before it reaches the protocol layer."""
 
+    def __init__(self, app, api_url):
+        super().__init__(app)
+        self.api_url = api_url.rstrip('/') + '/'
+        from urllib.parse import urlsplit
+        parsed = urlsplit(api_url)
+        self.metadata_url = f'{parsed.scheme}://{parsed.netloc}/.well-known/oauth-protected-resource/mcp'
+
     async def dispatch(self, request: Request, call_next):
-        if request.url.path.startswith('/mcp'):
-            header = request.headers.get('authorization', '')
-            if not header.lower().startswith('bearer ') and not request.headers.get('x-api-key'):
-                return JSONResponse(
-                    {'error': 'Authorization required: Bearer <cdk_ API key>.'}, status_code=401,
-                    headers={'WWW-Authenticate': 'Bearer realm="consultancy-mcp"'},
-                )
+        if not request.url.path.startswith('/mcp'):
+            return await call_next(request)
+        header = request.headers.get('authorization', '')
+        key = request.headers.get('x-api-key', '')
+        challenge = {'WWW-Authenticate': f'Bearer resource_metadata="{self.metadata_url}", scope="crm"'}
+        if not header.lower().startswith('bearer ') and not key:
+            return JSONResponse({'error': 'Connect your account or provide an API key.'}, status_code=401, headers=challenge)
+        # Validate at the MCP boundary as well as at each downstream API call.
+        # This makes expired/revoked tokens trigger the client's OAuth flow
+        # instead of surfacing as a successful MCP response with a tool error.
+        import httpx
+        credentials = {'Authorization': header} if header else {'X-API-Key': key}
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+                response = await client.get(self.api_url + 'users/me/', headers=credentials)
+        except httpx.HTTPError:
+            return JSONResponse({'error': 'Account verification temporarily unavailable.'}, status_code=503)
+        if response.status_code in (401, 403):
+            return JSONResponse({'error': 'Reconnect your account.'}, status_code=401, headers=challenge)
+        if response.status_code != 200:
+            return JSONResponse({'error': 'Account verification temporarily unavailable.'}, status_code=503)
         return await call_next(request)
 
 
@@ -155,5 +176,5 @@ def create_http_app(settings: Settings, transport: Transport | None = None,
         return JSONResponse({'status': 'ok', 'version': __version__, 'read_only': settings.read_only})
 
     app = mcp.streamable_http_app()
-    app.add_middleware(BearerRequiredMiddleware)
+    app.add_middleware(BearerRequiredMiddleware, api_url=settings.api_url)
     return app

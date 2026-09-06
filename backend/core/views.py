@@ -1660,8 +1660,9 @@ class ApiKeyViewSet(viewsets.GenericViewSet):
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
-        if isinstance(getattr(request, 'auth', None), ApiKey):
-            raise PermissionDenied('API keys cannot be managed with an API key. Sign in with your password.')
+        from oauth2_provider.models import AccessToken
+        if isinstance(getattr(request, 'auth', None), (ApiKey, AccessToken)):
+            raise PermissionDenied('Access keys cannot be managed through a delegated connection. Sign in with your password.')
 
     def _target_user(self):
         """The user whose keys the caller is asking about, after the scope check."""

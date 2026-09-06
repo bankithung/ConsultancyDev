@@ -1,0 +1,9 @@
+{% extends 'core/oauth/base.html' %}{% block content %}
+{% if error %}<h1>Could not connect</h1><p>{{ error.description }}</p><a href="/app/mcp">Back to connection settings</a>
+{% else %}<h1>Connect {{ application.name }}?</h1>
+<div class="account"><strong>{{ request.user.username }}</strong><br>{{ request.user.company.name }} · {{ request.user.get_role_display }}</div>
+<p>This connection can:</p><ul>{% for scope in scopes_descriptions %}<li>{{ scope }}</li>{% endfor %}</ul>
+<p>Your existing company and role permissions apply. The assistant may make changes you request, including creating, editing, or deleting records you can manage.</p>
+<form method="post">{% csrf_token %}{% for field in form %}{% if field.is_hidden %}{{ field }}{% endif %}{% endfor %}{{ form.errors }}{{ form.non_field_errors }}
+<div class="actions"><button type="submit" name="allow" value="Authorize">Allow connection</button><button type="submit" class="secondary">Cancel</button></div></form>
+<p class="small">You can disconnect this assistant from your <a href="/oauth/connections/">connected accounts</a> at any time.</p>{% endif %}{% endblock %}

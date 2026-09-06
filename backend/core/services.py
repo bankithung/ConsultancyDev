@@ -103,6 +103,10 @@ def revoke_all_tokens(user):
         BlacklistedToken, OutstandingToken,
     )
     from .models import ApiKey
+    from oauth2_provider.models import AccessToken, RefreshToken, Grant
+    RefreshToken.objects.filter(user=user).delete()
+    AccessToken.objects.filter(user=user).delete()
+    Grant.objects.filter(user=user).delete()
 
     revoked = 0
     for token in OutstandingToken.objects.filter(user=user):

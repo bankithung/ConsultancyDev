@@ -77,6 +77,9 @@ npm run build
 
 # 4) Restart services
 systemctl restart consultancy-backend consultancy-frontend
+if systemctl is-active --quiet consultancy-mcp; then
+  systemctl restart consultancy-mcp
+fi
 sleep 3
 
 # 5) Health check

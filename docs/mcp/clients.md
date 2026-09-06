@@ -224,16 +224,14 @@ directory Codex starts the process in.
 Settings → Connectors → **Add custom connector**, URL `https://console.nexxteducation.in/mcp`.
 If the dialog offers a custom authentication header, set `Authorization: Bearer <KEY>`.
 
-If it only offers OAuth, this server cannot serve it: OAuth 2.1 authorization and dynamic client
-registration are deliberately not implemented in this iteration. Use a local (stdio) client
-instead — Claude Desktop or Claude Code, above.
+OAuth clients require a pre-registered client ID and their exact HTTPS callback URL.
+Ask the server administrator to register the client; dynamic registration is disabled.
 
 ## ChatGPT (connectors / developer mode)
 
-Settings → Connectors → **Create**, URL `https://console.nexxteducation.in/mcp`, with
-`Authorization: Bearer <KEY>` wherever the dialog allows a custom header or API key. The same
-caveat applies: there is no OAuth flow here, so a connector that insists on one will not
-complete.
+Use OAuth with a User-Defined OAuth Client. See [ChatGPT OAuth setup](chatgpt-oauth.md)
+for the registered client and connection fields. Sign in with your consultancy account
+and approve access. ChatGPT's custom connector form does not accept personal API keys.
 
 Deep-research connectors that require the two special `search` and `fetch` tools are not
 supported either. The general MCP tools (`search_everything`, `student_360`, the `list_*` and
