@@ -56,3 +56,5 @@ Thumbs.db
 
 # Subagent-driven-development scratch (ledgers, briefs, review packages)
 .superpowers/
+deploy/webhook_secret
+.deploy_test

@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
-import { AlertCircle, BarChart3, Info } from 'lucide-react';
+import { AlertCircle, BarChart3, Eye, EyeOff, Info } from 'lucide-react';
 import Link from 'next/link';
 
 /**
@@ -40,6 +40,7 @@ function LoginForm() {
     const searchParams = useSearchParams();
     const { login, isLoading, error: authError, clearError } = useAuthStore();
     const [localError, setLocalError] = useState<string | null>(null);
+    const [showPassword, setShowPassword] = useState(false);
 
     // `?reason=` explains an involuntary sign-out. Routed through
     // authReasonMessage() rather than rendered raw — the value comes from the
@@ -155,13 +156,24 @@ function LoginForm() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="password" className="text-slate-700 font-medium font-body">Password</Label>
-                                    <Input
-                                        id="password"
-                                        type="password"
-                                        {...register('password')}
-                                        disabled={isLoading}
-                                        className="h-11 border-slate-300 focus:border-teal-500 focus:ring-teal-500"
-                                    />
+                                    <div className="relative">
+                                        <Input
+                                            id="password"
+                                            type={showPassword ? 'text' : 'password'}
+                                            {...register('password')}
+                                            disabled={isLoading}
+                                            className="h-11 border-slate-300 focus:border-teal-500 focus:ring-teal-500 pr-11"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowPassword((v) => !v)}
+                                            aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                            tabIndex={-1}
+                                            className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 hover:text-slate-600 transition-colors"
+                                        >
+                                            {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                                        </button>
+                                    </div>
                                     {errors.password && (
                                         <p className="text-sm text-red-600 font-body">{errors.password.message}</p>
                                     )}
