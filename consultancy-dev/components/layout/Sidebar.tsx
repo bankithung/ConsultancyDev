@@ -16,6 +16,7 @@ import {
   Settings,
   Users,
   Server,
+  Bot,
   CheckSquare,
   X,
   CalendarClock,
@@ -175,6 +176,10 @@ const NAV_SECTIONS: NavSection[] = [
       { label: 'Commissions', href: '/app/commissions', icon: DollarSign, roles: ADMINS },
       { label: 'Settings', href: '/app/settings', icon: Settings, roles: ADMINS },
     ],
+  },
+  {
+    heading: 'Connections',
+    items: [{ label: 'Connect AI / MCP', href: '/app/mcp', icon: Bot, roles: EVERYONE }],
   },
   {
     heading: 'Platform',

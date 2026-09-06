@@ -70,34 +70,14 @@ function resolveApiUrl(): string {
   return API_URL;
 }
 
-/**
- * The stdio client config, with this deployment's API URL already filled in.
- *
- * `cwd` and PYTHONPATH name the same directory on purpose, as docs/mcp/clients.md
- * does: clients disagree about which one they honour, and either alone makes
- * `python -m mcp_server` resolve. Setting both means the snippet works wherever
- * it is pasted.
- */
+/** Remote configuration using the current deployment and a personal key. */
 function mcpConfigSnippet(key: string, apiUrl: string): string {
-  const backend = '<path to>/ConsultancyDev/backend';
-  return JSON.stringify(
-    {
-      mcpServers: {
-        'consultancy-dev': {
-          command: 'python',
-          args: ['-m', 'mcp_server'],
-          cwd: backend,
-          env: {
-            PYTHONPATH: backend,
-            CONSULTANCY_API_URL: apiUrl,
-            CONSULTANCY_API_KEY: key,
-          },
-        },
-      },
+  const url = new URL('/mcp', apiUrl).toString();
+  return JSON.stringify({
+    mcpServers: {
+      'consultancy-dev': { url, headers: { Authorization: `Bearer ${key}` } },
     },
-    null,
-    2,
-  );
+  }, null, 2);
 }
 
 export function ApiKeysCard() {
@@ -368,7 +348,7 @@ export function ApiKeysCard() {
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium leading-none text-slate-900">MCP client config (stdio)</p>
+                <p className="text-sm font-medium leading-none text-slate-900">MCP client config (remote HTTP)</p>
                 <Button
                   type="button"
                   size="sm"
@@ -383,10 +363,8 @@ export function ApiKeysCard() {
                 {mcpConfigSnippet(created.key, apiUrl)}
               </pre>
               <p className="text-xs text-slate-500">
-                Running the server over HTTP instead (
-                <code className="font-mono">--transport streamable-http</code>)? Point the client at that
-                server&apos;s <code className="font-mono">/mcp</code> endpoint and send the header{' '}
-                <code className="font-mono">Authorization: Bearer &lt;key&gt;</code>.
+                Use this configuration in clients that accept an mcpServers JSON file.
+                For other clients, enter the URL and bearer token in their MCP settings.
               </p>
             </div>
           </div>
