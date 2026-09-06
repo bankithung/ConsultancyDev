@@ -18,8 +18,8 @@ WorkingDirectory=/opt/consultancy/backend
 # optional; create it only if you want to override something below.
 EnvironmentFile=-/opt/consultancy/backend/.env.mcp
 
-# The MCP server calls the API like any other client, over the loopback.
-Environment=CONSULTANCY_API_URL=http://127.0.0.1:8000/api/
+# Use HTTPS because the production API enforces secure requests.
+Environment=CONSULTANCY_API_URL=https://console.nexxteducation.in/api/
 Environment=CONSULTANCY_MCP_HOST=127.0.0.1
 Environment=CONSULTANCY_MCP_PORT=8765
 
