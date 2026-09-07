@@ -187,15 +187,15 @@ export interface User {
   is_active_employee: boolean;
   last_login: string | null;
   /**
-   * Branch managers this head manager oversees. Read-only here; the admin
-   * sets it on the user form. Empty for every other role.
+   * Legacy reporting links retained for compatibility. Head managers now
+   * oversee every branch in their company.
    */
   managed_managers?: number[];
 }
 
 /**
  * Admin-only write shape (`UserAdminSerializer`), where role and branch ARE
- * writable. `managed_managers` assigns branch managers to a head manager.
+ * writable. `managed_managers` is a legacy reporting field.
  */
 export interface UserAdminInput {
   username: string;

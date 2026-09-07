@@ -262,34 +262,27 @@ export function TeamDirectory() {
   /*
    * Who each person reports to.
    *
-   * There is no reporting-manager column on User. The only stored link is
-   * `managed_managers` (head manager -> branch managers), so a branch manager's
-   * manager is read from that, and an employee's is the branch manager sitting
-   * in their branch. Anything above that reports to nobody inside the app.
+   * A head manager leads every branch in the company. Employees report to a
+   * branch manager in their assigned branch.
    */
   const managerOf = useMemo(() => {
-    const byId = new Map(roster.map((u) => [u.id, u]));
-    const headOfManager = new Map<string, User>();
-    for (const head of roster) {
-      if (head.role !== 'HEAD_MANAGER') continue;
-      for (const managedId of head.managed_managers ?? []) {
-        headOfManager.set(String(managedId), head);
-      }
-    }
+    const headManagerByCompany = new Map<number, User>();
     const managerOfBranch = new Map<string, User>();
     for (const u of roster) {
+      if (u.role === 'HEAD_MANAGER' && u.company && !headManagerByCompany.has(u.company)) {
+        headManagerByCompany.set(u.company, u);
+      }
       if (u.role === 'BRANCH_MANAGER' && u.branch) managerOfBranch.set(String(u.branch), u);
     }
     return (row: User): string => {
       if (row.role === 'BRANCH_MANAGER') {
-        const head = headOfManager.get(String(row.id));
-        return head ? head.full_name || head.username : '—';
+        const headManager = row.company ? headManagerByCompany.get(row.company) : undefined;
+        return headManager ? headManager.full_name || headManager.username : '—';
       }
       if (row.role === 'EMPLOYEE' && row.branch) {
         const mgr = managerOfBranch.get(String(row.branch));
         if (mgr && mgr.id !== row.id) return mgr.full_name || mgr.username;
       }
-      void byId;
       return '—';
     };
   }, [roster]);
@@ -1093,4 +1086,3 @@ export function TeamDirectory() {
     </div>
   );
 }
-

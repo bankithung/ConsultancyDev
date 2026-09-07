@@ -117,7 +117,7 @@ class Command(BaseCommand):
         emp_d1 = self._user('emp.dimapur1', Role.EMPLOYEE, company, dimapur, 'Imli', 'Ao')
         emp_d2 = self._user('emp.dimapur2', Role.EMPLOYEE, company, dimapur, 'Rokovilie', 'Nakhro')
 
-        # The admin configures which managers the head manager oversees.
+        # Legacy reporting links retained for compatibility.
         head.managed_managers.set([mgr_k, mgr_d])
 
         staff = {
@@ -296,7 +296,7 @@ class Command(BaseCommand):
         for username, role, branch in rows:
             w(f'  {username:<20} {role:<16} {branch}')
         w('')
-        w(f'  Head manager oversees: {", ".join(m.username for m in staff["head"].managed_managers.all())}')
+        w('  Head manager oversees: all company branches')
         w(f'  Company: {company.name} ({company.branches.count()} branches)')
         w(f'  Enquiries {Enquiry.objects.filter(company=company).count()}, '
           f'Registrations {Registration.objects.filter(company=company).count()}, '

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-02T19:34:34.079581+00:00",
+  "generated_at": "2026-09-07T07:07:16.707815+00:00",
   "resources": [
     {
       "prefix": "agents",
@@ -9667,7 +9667,7 @@
     "visibility": {
       "DEV_ADMIN": "everything, all companies",
       "COMPANY_ADMIN": "everything in own company",
-      "HEAD_MANAGER": "records in the branches of the branch managers assigned to them (managed_managers), plus own branch",
+      "HEAD_MANAGER": "records in all branches of their own company, including new branches and branches without a manager",
       "BRANCH_MANAGER": "records in own branch",
       "EMPLOYEE": "records they OWN (owner field), plus records transferred to them and accepted"
     }

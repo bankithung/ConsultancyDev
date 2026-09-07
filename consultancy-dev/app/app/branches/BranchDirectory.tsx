@@ -1,380 +1,140 @@
 'use client';
 
-import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowUpDown, Building2, MapPin, Pencil, Plus, Power, Search, Users } from 'lucide-react';
-
+import { useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, Building2, ChevronRight, Pencil, Plus, Power, Search, ShieldCheck, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { PaginationBar } from '@/components/common/PaginationBar';
-import { EmptyState, ErrorBanner, ErrorState, LoadingState } from '@/components/common/states';
+import { ErrorBanner, ErrorState, LoadingState } from '@/components/common/states';
+import { ROLE_LABELS } from '@/components/rbac/roles';
+import { useCurrentRole } from '@/components/rbac/useCurrentRole';
 import { apiClient } from '@/lib/apiClient';
-import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
-import { useDebounce } from '@/hooks/useDebounce';
-import type { Branch } from '@/lib/types';
-
+import { loadAllPages } from '@/app/app/student-profile/aggregate';
+import type { Branch, Role, User } from '@/lib/types';
 import { BranchFormDrawer } from './BranchFormDrawer';
 import { BranchMembersDialog } from './BranchMembersDialog';
 
-/**
- * Branches — one panel: toolbar, a summary strip, the table, pagination.
- *
- * There is no manager FK on Branch — branch managers are Users with
- * role=BRANCH_MANAGER and branch=<id>, managed through the Members dialog on this page. The serializer exposes them as `manager_names`.
- *
- * WHAT THE SERVER ACTUALLY SUPPORTS. `BranchViewSet` (backend/core/views.py)
- * declares `search_fields = ('name', 'code', 'city')` and NOTHING else — no
- * `filterset_class`, no `filterset_fields`. Probed against the running API:
- * `?is_active=true`, `?is_active=false` and a nonsense `?zzz_nonsense=1` all
- * return the SAME count as the bare list, because DRF discards a parameter it
- * does not recognise and answers 200 with the full set. So this screen offers
- * search and sort and no filter control at all; a Filter button here would
- * change the URL, change nothing else, and look like it had worked.
- *
- * Ordering IS live (the global `OrderingFilter`), and every option in the sort
- * menu was checked against the API to confirm it genuinely reorders rows.
- * `ordering=bogusfield` is likewise dropped in silence, so only verified
- * fields are offered.
- */
-
-/** Every value here was confirmed to reorder rows on the live endpoint. */
-const SORT_OPTIONS = [
-  { value: 'name', label: 'Name (A–Z)' },
-  { value: '-name', label: 'Name (Z–A)' },
-  { value: 'city', label: 'City' },
-  { value: '-user_count', label: 'Most staff' },
-] as const;
-
 export function BranchDirectory() {
   const queryClient = useQueryClient();
-
-  const [searchInput, setSearchInput] = useState('');
-  const search = useDebounce(searchInput, 300);
-  const [ordering, setOrdering] = useState<string>('name');
-
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
-  const [editing, setEditing] = useState<Branch | null>(null);
-  /** Bumped on every open so the drawer remounts with a clean form. */
-  const [formSession, setFormSession] = useState(0);
+  const { can } = useCurrentRole();
+  const canManageBranches = can('manageBranches');
+  const canManageMembers = can('manageUsers');
+  const [search, setSearch] = useState('');
+  const [memberSearch, setMemberSearch] = useState('');
+  const [ordering, setOrdering] = useState('name');
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [branchForm, setBranchForm] = useState<{ branch: Branch | null; key: number } | null>(null);
   const [toggleTarget, setToggleTarget] = useState<Branch | null>(null);
-
-  const branches = usePaginatedQuery<Branch>(['branches'], apiClient.branches.list, {
-    search,
-    ordering,
+  const [assignment, setAssignment] = useState<{ branch: Branch; user?: User; role?: Role } | null>(null);
+  const branches = useQuery({
+    queryKey: ['branches', 'workspace'],
+    queryFn: () => loadAllPages<Branch>(apiClient.branches.list, { ordering: 'name' }, 200, 10),
   });
-
-  const toggleMutation = useMutation({
-    mutationFn: (branch: Branch) =>
-      apiClient.branches.update(branch.id, { is_active: !branch.is_active }),
-    onSuccess: () => {
-      // Deactivating a branch changes seat counting and who can reach what, so
-      // both the list and the shared branch picker must refetch.
-      queryClient.invalidateQueries({ queryKey: ['branches'] });
-      queryClient.invalidateQueries({ queryKey: ['branch-options'] });
+  const roster = useQuery({
+    queryKey: ['users', 'roster'],
+    queryFn: () => loadAllPages<User>(apiClient.users.list, { ordering: 'username' }, 200, 10),
+  });
+  const allBranches = useMemo(() => branches.data ?? [], [branches.data]);
+  const allMembers = useMemo(() => roster.data ?? [], [roster.data]);
+  const rosterComplete = roster.isSuccess && !roster.isError && allMembers.length < 2000;
+  const membersFor = (branch: Branch) => allMembers.filter((user) => user.company === branch.company && user.branch === branch.id && user.role !== 'HEAD_MANAGER' && user.role !== 'DEV_ADMIN');
+  const managersFor = (branch: Branch) => membersFor(branch).filter((user) => user.role === 'BRANCH_MANAGER' && user.is_active && user.is_active_employee);
+  const visibleBranches = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return allBranches.filter((branch) => `${branch.name} ${branch.code} ${branch.city} ${branch.company_name}`.toLowerCase().includes(needle))
+      .sort((a, b) => ordering === 'staff' ? b.user_count - a.user_count : ordering === 'recent' ? b.id - a.id : a.name.localeCompare(b.name));
+  }, [allBranches, search, ordering]);
+  const selected = visibleBranches.find((branch) => branch.id === selectedId)
+    ?? visibleBranches.find((branch) => branch.is_default)
+    ?? visibleBranches[0];
+  const companyHeads = selected ? allMembers.filter((user) => user.company === selected.company && user.role === 'HEAD_MANAGER' && user.is_active && user.is_active_employee) : [];
+  const currentMembers = selected ? membersFor(selected) : [];
+  const filteredMembers = currentMembers.filter((user) => `${user.full_name} ${user.username} ${user.email} ${ROLE_LABELS[user.role]}`.toLowerCase().includes(memberSearch.trim().toLowerCase()));
+  const missingManager = !!selected && rosterComplete && managersFor(selected).length === 0;
+  const toggle = useMutation({
+    mutationFn: (branch: Branch) => apiClient.branches.update(branch.id, { is_active: !branch.is_active }),
+    onSuccess: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['branches'] }), queryClient.invalidateQueries({ queryKey: ['branch-options'] })]);
       setToggleTarget(null);
     },
   });
-
-  const openForm = (branch: Branch | null) => {
-    setEditing(branch);
-    setFormSession((n) => n + 1);
-    setIsFormOpen(true);
-  };
-
-  /*
-   * Page-scoped, and labelled as such where they are shown.
-   *
-   * These used to sit in KPI cards beside the server's `count` reading "Active"
-   * and "Staff", as though all three were totals. They are not: they reduce
-   * over whatever rows this page happens to hold. There is no honest total to
-   * put in their place — the endpoint has no `is_active` filter to take a
-   * filtered `count` from and no staff aggregate — so the wording carries the
-   * scope instead of the number pretending to a reach it does not have.
-   */
-  const activeOnPage = branches.rows.filter((branch) => branch.is_active).length;
-  const staffOnPage = branches.rows.reduce((sum, branch) => sum + branch.user_count, 0);
-
-  const isSearching = search.trim() !== '';
+  const openBranchForm = (branch: Branch | null) => setBranchForm({ branch, key: Date.now() });
 
   return (
-    <div>
-      <section>
-        <div className="flex flex-col gap-2 border-b border-slate-100 p-3 sm:flex-row sm:items-center">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Search by name, code or city…"
-              aria-label="Search branches"
-              className="h-9 border-slate-200 bg-white pl-9 text-sm focus:border-teal-500 focus:ring-teal-500"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Select value={ordering} onValueChange={setOrdering}>
-              <SelectTrigger
-                aria-label="Sort branches"
-                className="h-9 w-[9.5rem] shrink-0 border-slate-200 text-xs"
-              >
-                <ArrowUpDown className="mr-1.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SORT_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value} className="text-xs">
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Button
-              onClick={() => openForm(null)}
-              size="sm"
-              className="h-9 shrink-0 bg-teal-600 text-xs text-white hover:bg-teal-700"
-            >
-              <Plus className="mr-1 h-3.5 w-3.5" />
-              <span className="hidden sm:inline">New branch</span>
-              <span className="sm:hidden">New</span>
-            </Button>
-          </div>
+    <div className="grid min-w-0 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]" data-testid="branch-workspace">
+      <section aria-label="Branches" className="min-w-0 border-b border-slate-200 bg-slate-50/40 lg:border-b-0 lg:border-r" data-testid="branch-list">
+        <div className="flex items-center justify-between gap-2 p-4">
+          <h2 className="text-sm font-semibold text-slate-900">Branches <span className="ml-1 text-xs font-normal text-slate-500">{branches.isSuccess ? allBranches.length : ''}</span></h2>
+          {canManageBranches && <Button size="sm" className="h-8 bg-teal-600 text-xs hover:bg-teal-700" onClick={() => openBranchForm(null)}><Plus size={14} className="mr-1" /> New branch</Button>}
         </div>
-
-        {toggleMutation.isError && (
-          <div className="border-b border-slate-100 p-3">
-            <ErrorBanner error={toggleMutation.error} onDismiss={() => toggleMutation.reset()} />
-          </div>
+        <div className="flex flex-col gap-2 px-4 pb-3 xl:flex-row">
+          <div className="relative min-w-0 flex-1"><Search size={14} className="absolute left-3 top-2.5 text-slate-400" /><Input className="h-9 bg-white pl-8 text-xs" aria-label="Search branches" placeholder="Search branches…" value={search} onChange={(event) => { setSearch(event.target.value); setMemberSearch(''); }} /></div>
+          <select aria-label="Sort branches" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600" value={ordering} onChange={(event) => setOrdering(event.target.value)}><option value="name">Name A–Z</option><option value="staff">Most staff</option><option value="recent">Newest</option></select>
+        </div>
+        {branches.isError ? <div className="p-4"><ErrorState error={branches.error} onRetry={() => branches.refetch()} /></div> : branches.isLoading ? <div className="p-4"><LoadingState rows={3} label="Loading branches" /></div> : (
+          <ul className="max-h-72 space-y-1 overflow-y-auto px-2 pb-3 lg:max-h-[640px]">
+            {visibleBranches.map((branch) => {
+              const active = selected?.id === branch.id;
+              const needsManager = rosterComplete && managersFor(branch).length === 0;
+              return <li key={branch.id}><button type="button" aria-pressed={active} aria-controls="selected-branch-members" onClick={() => { setSelectedId(branch.id); setMemberSearch(''); }} className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${active ? 'border-teal-200 bg-white shadow-sm' : 'border-transparent hover:bg-white'}`}>
+                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${active ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-400'}`}><Building2 size={17} /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block break-words text-sm font-semibold text-slate-900">{branch.name}</span>
+                  <span className="mt-0.5 block truncate text-xs text-slate-500">{[branch.code, branch.city].filter(Boolean).join(' · ') || branch.company_name}</span>
+                  <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+                    <span>{rosterComplete ? membersFor(branch).length : branch.user_count} members</span>
+                    {branch.is_default && <span className="text-teal-700">Default</span>}
+                    {!branch.is_active && <span>Inactive</span>}
+                    {needsManager && <span className="inline-flex items-center gap-1 text-amber-700"><AlertTriangle size={11} /> No branch manager</span>}
+                  </span>
+                </span>
+                <ChevronRight size={15} className={`mt-2 shrink-0 ${active ? 'text-teal-600' : 'text-slate-300'}`} />
+              </button></li>;
+            })}
+            {visibleBranches.length === 0 && <li className="px-4 py-8 text-center text-sm text-slate-500">{search ? 'No matching branches.' : 'No branches yet.'}</li>}
+          </ul>
         )}
-
-        {/*
-          The only total here is the server's own `count`. The other two figures
-          say "on this page" because that is all they are — see the note above
-          `activeOnPage`.
-        */}
-        {branches.rows.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 bg-slate-50/70 px-3 py-2 text-xs text-slate-600">
-            <span>
-              <span className="font-semibold text-slate-900">{branches.count}</span>{' '}
-              {branches.count === 1 ? 'branch' : 'branches'}
-              {isSearching && ' matching'}
-            </span>
-            <span aria-hidden className="text-slate-300">
-              |
-            </span>
-            <span>
-              <span className="font-semibold text-slate-900">{activeOnPage}</span> of{' '}
-              {branches.rows.length} active on this page
-            </span>
-            <span aria-hidden className="text-slate-300">
-              |
-            </span>
-            <span>
-              <span className="font-semibold text-slate-900">{staffOnPage}</span> staff on this page
-            </span>
-          </div>
-        )}
-
-        {branches.isError ? (
-          <div className="p-4">
-            <ErrorState error={branches.error} onRetry={branches.refetch} />
-          </div>
-        ) : branches.isLoading ? (
-          <div className="p-4">
-            <LoadingState rows={4} label="Loading branches" />
-          </div>
-        ) : branches.rows.length === 0 ? (
-          <div className="p-4">
-            <EmptyState
-              icon={Building2}
-              title={isSearching ? 'No branches match that search' : 'No branches yet'}
-              description={
-                isSearching
-                  ? 'Try a different name, code or city.'
-                  : 'Add your first branch so staff and records can be assigned to a location.'
-              }
-              action={
-                isSearching ? (
-                  <Button variant="outline" onClick={() => setSearchInput('')}>
-                    Clear search
-                  </Button>
-                ) : (
-                  <Button onClick={() => openForm(null)} className="bg-teal-600 hover:bg-teal-700">
-                    <Plus className="mr-2 h-4 w-4" /> New branch
-                  </Button>
-                )
-              }
-            />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50">
-                <tr>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-700">
-                    Branch
-                  </th>
-                  <th className="hidden px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-700 md:table-cell">
-                    Managers
-                  </th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-700">
-                    Staff
-                  </th>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-slate-700">
-                    Status
-                  </th>
-                  <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-slate-700">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {branches.rows.map((branch) => {
-                  const managers = branch.manager_names;
-                  return (
-                    <tr key={branch.id} className="hover:bg-slate-50">
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-start gap-2.5">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
-                            <Building2 size={15} />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="truncate font-semibold text-slate-900">{branch.name}</p>
-                            <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-slate-500">
-                              <span className="font-mono">{branch.code}</span>
-                              {branch.city && (
-                                <>
-                                  <span aria-hidden>·</span>
-                                  <MapPin size={11} /> {branch.city}
-                                </>
-                              )}
-                            </p>
-                            <p className="mt-0.5 truncate text-xs text-slate-500 md:hidden">
-                              {managers.length > 0 ? managers.join(', ') : 'No manager assigned'}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="hidden px-3 py-2.5 md:table-cell">
-                        {managers.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {managers.map((name) => (
-                              <span
-                                key={name}
-                                className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
-                              >
-                                {name}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-slate-400">Not assigned</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className="inline-flex items-center gap-1.5 text-slate-700">
-                          <Users size={14} className="text-slate-400" /> {branch.user_count}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex flex-wrap gap-1">
-                          <Badge
-                            className={
-                              branch.is_active
-                                ? 'border-transparent bg-green-100 text-green-700 hover:bg-green-100'
-                                : 'border-transparent bg-slate-200 text-slate-600 hover:bg-slate-200'
-                            }
-                          >
-                            {branch.is_active ? 'Active' : 'Inactive'}
-                          </Badge>
-                          {branch.is_default && (
-                            <Badge className="border-transparent bg-blue-100 text-blue-700 hover:bg-blue-100">
-                              Default
-                            </Badge>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="sm" className="h-8 text-xs text-teal-700" onClick={() => setSelectedBranch(branch)} aria-label={`Manage members for ${branch.name}`}>
-                            <Users size={14} className="mr-1.5" /> Members
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 hover:bg-teal-50 hover:text-teal-600"
-                            onClick={() => openForm(branch)}
-                            aria-label={`Edit ${branch.name}`}
-                          >
-                            <Pencil size={15} />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 hover:bg-amber-50 hover:text-amber-600 disabled:opacity-40"
-                            onClick={() => setToggleTarget(branch)}
-                            disabled={branch.is_default}
-                            title={
-                              branch.is_default ? 'The default branch cannot be deactivated' : undefined
-                            }
-                            aria-label={`${branch.is_active ? 'Deactivate' : 'Activate'} ${branch.name}`}
-                          >
-                            <Power size={15} />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        <PaginationBar
-          page={branches.page}
-          pages={branches.pages}
-          count={branches.count}
-          pageSize={branches.pageSize}
-          onPageChange={branches.setPage}
-          isLoading={branches.isFetching}
-        />
+        {allBranches.length >= 2000 && <p className="px-4 pb-3 text-xs text-amber-700">Showing the first 2,000 branches.</p>}
       </section>
 
-      {selectedBranch && <BranchMembersDialog branch={selectedBranch} onClose={() => setSelectedBranch(null)} />}
-
-      <BranchFormDrawer
-        key={formSession}
-        open={isFormOpen}
-        branch={editing}
-        onClose={() => setIsFormOpen(false)}
-      />
-
-      <ConfirmDialog
-        open={toggleTarget !== null}
-        onClose={() => setToggleTarget(null)}
-        onConfirm={() => toggleTarget && toggleMutation.mutate(toggleTarget)}
-        title={toggleTarget?.is_active ? 'Deactivate branch?' : 'Activate branch?'}
-        description={
-          toggleTarget?.is_active
-            ? `${toggleTarget?.name} will stop accepting new records and staff assignments. Existing data is kept.`
-            : `${toggleTarget?.name} will be able to receive records and staff again.`
-        }
-        confirmText={toggleTarget?.is_active ? 'Deactivate' : 'Activate'}
-        confirmVariant={toggleTarget?.is_active ? 'destructive' : 'default'}
-        isLoading={toggleMutation.isPending}
-      />
+      <section id="selected-branch-members" aria-label="Branch members" className="min-w-0" data-testid="branch-members">
+        {selected ? <>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
+            <div className="min-w-0"><h2 className="break-words text-sm font-semibold text-slate-900">{selected.name}</h2><p className="mt-0.5 text-xs text-slate-500">Members and roles</p></div>
+            <div className="flex items-center gap-1">
+              {canManageMembers && <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setAssignment({ branch: selected })}><Plus size={14} className="mr-1" /> Assign member</Button>}
+              {canManageBranches && <><Button size="sm" variant="ghost" className="h-8 w-8 p-0" aria-label={`Edit ${selected.name}`} onClick={() => openBranchForm(selected)}><Pencil size={14} /></Button><Button size="sm" variant="ghost" className="h-8 w-8 p-0" disabled={selected.is_default} aria-label={`${selected.is_active ? 'Deactivate' : 'Activate'} ${selected.name}`} title={selected.is_default ? 'Default branch stays active' : undefined} onClick={() => setToggleTarget(selected)}><Power size={14} /></Button></>}
+            </div>
+          </div>
+          <div className="flex items-start gap-3 border-b border-slate-100 bg-slate-50/50 p-4">
+            <ShieldCheck size={18} className="mt-0.5 shrink-0 text-teal-600" />
+            <div className="min-w-0 flex-1"><p className="text-xs font-semibold text-slate-700">Head manager <span className="ml-1 font-normal text-slate-500">· All branches</span></p>
+              {roster.isLoading ? <p className="mt-1 text-xs text-slate-500">Loading…</p> : companyHeads.length > 0 ? <div className="mt-1 space-y-2">{companyHeads.map((head) => <div key={head.id} className="flex items-center justify-between gap-2"><Link href={`/app/team/${head.id}`} className="truncate text-sm font-medium text-slate-900 hover:text-teal-700 hover:underline">{head.full_name || head.username}</Link>{canManageMembers && <button className="shrink-0 text-xs font-medium text-teal-700 hover:underline" onClick={() => setAssignment({ branch: selected, user: head })}>Manage</button>}</div>)}{companyHeads.length > 1 && <p className="text-xs text-amber-700">More than one head manager is active.</p>}</div> : <div className="mt-1 flex items-center justify-between gap-2"><span className="text-xs text-slate-500">{rosterComplete ? 'Not assigned' : 'Unavailable'}</span>{rosterComplete && canManageMembers && <button className="text-xs font-medium text-teal-700 hover:underline" onClick={() => setAssignment({ branch: selected, role: 'HEAD_MANAGER' })}>Assign head manager</button>}</div>}
+            </div>
+          </div>
+          {roster.isError ? <div className="p-4"><ErrorState error={roster.error} onRetry={() => roster.refetch()} /></div> : roster.isLoading ? <div className="p-4"><LoadingState rows={3} label="Loading members" /></div> : <>
+            {missingManager && <div role="status" className="mx-4 mt-4 flex gap-2 rounded-md bg-amber-50 px-3 py-2.5 text-xs text-amber-800"><AlertTriangle size={15} className="shrink-0" /><p>No active branch manager. Assign one when ready.</p></div>}
+            {!rosterComplete && <p className="px-4 pt-3 text-xs text-amber-700">Member list may be incomplete. Manager status unavailable.</p>}
+            <div className="flex items-center gap-3 p-4"><div className="relative min-w-0 flex-1"><Search size={14} className="absolute left-3 top-2.5 text-slate-400" /><Input aria-label="Search branch members" className="h-9 pl-8 text-xs" placeholder="Search members…" value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} /></div><span className="shrink-0 text-xs text-slate-500">{currentMembers.length} members</span></div>
+            <ul className="max-h-[480px] divide-y divide-slate-100 overflow-y-auto">
+              {filteredMembers.map((member) => <li key={member.id} className="flex items-center gap-3 px-4 py-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-teal-50 text-xs font-semibold text-teal-700">{(member.full_name || member.username).slice(0, 1).toUpperCase()}</span>
+                <div className="min-w-0 flex-1"><Link href={`/app/team/${member.id}`} className="block truncate text-sm font-medium text-slate-900 hover:text-teal-700 hover:underline">{member.full_name || member.username}</Link><p className="mt-0.5 truncate text-xs text-slate-500">{member.email}</p><div className="mt-1 flex flex-wrap items-center gap-2"><Badge className={`border-0 text-[10px] ${member.role === 'BRANCH_MANAGER' ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-600'}`}>{ROLE_LABELS[member.role]}</Badge>{(!member.is_active || !member.is_active_employee) && <span className="text-[10px] text-slate-400">Inactive</span>}</div></div>
+                {canManageMembers && <Button variant="ghost" size="sm" className="h-8 shrink-0 text-xs text-teal-700" aria-label={`Manage ${member.full_name || member.username}`} onClick={() => setAssignment({ branch: selected, user: member })}>Manage</Button>}
+              </li>)}
+              {filteredMembers.length === 0 && <li className="px-4 py-12 text-center"><Users size={24} className="mx-auto mb-2 text-slate-300" /><p className="text-sm font-medium text-slate-600">{memberSearch ? 'No matching members' : 'No members assigned'}</p><p className="mt-1 text-xs text-slate-500">{memberSearch ? 'Try another name or email.' : 'Assign an existing team member.'}</p></li>}
+            </ul>
+            <div className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">Need a new account? <Link href="/app/team?tab=members" className="font-medium text-teal-700 hover:underline">Add a member in Team</Link></div>
+          </>}
+        </> : <div className="flex min-h-72 flex-col items-center justify-center p-6 text-center"><Building2 size={28} className="mb-3 text-slate-300" /><p className="text-sm text-slate-500">{branches.isLoading ? 'Loading branches…' : 'Select a branch to view members.'}</p></div>}
+      </section>
+      {branchForm && <BranchFormDrawer key={branchForm.key} open branch={branchForm.branch} onClose={() => setBranchForm(null)} />}
+      {assignment && <BranchMembersDialog branch={assignment.branch} initialUser={assignment.user} initialRole={assignment.role} startAssigning={!assignment.user} onClose={() => setAssignment(null)} />}
+      <ConfirmDialog open={!!toggleTarget} onClose={() => setToggleTarget(null)} onConfirm={() => toggleTarget && toggle.mutate(toggleTarget)} title={toggleTarget?.is_active ? 'Deactivate branch?' : 'Activate branch?'} description={toggleTarget?.is_active ? 'Existing members and records are kept.' : 'Allow new records and assignments.'} confirmText={toggleTarget?.is_active ? 'Deactivate' : 'Activate'} confirmVariant={toggleTarget?.is_active ? 'destructive' : 'default'} isLoading={toggle.isPending} />
+      {toggle.isError && <div className="p-4 lg:col-span-2"><ErrorBanner error={toggle.error} onDismiss={() => toggle.reset()} /></div>}
     </div>
   );
 }
-

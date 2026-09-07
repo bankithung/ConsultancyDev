@@ -301,7 +301,8 @@ class UserViewSet(viewsets.ModelViewSet):
         if user.is_company_admin:
             return qs
         if user.is_head_manager:
-            return qs.filter(Q(branch_id__in=branch_ids_for(user)) | Q(pk=user.pk))
+            # The head manager sees the full company team, including unassigned staff.
+            return qs
         if user.is_branch_manager:
             return qs.filter(Q(branch_id=user.branch_id) | Q(pk=user.pk))
         return qs.filter(pk=user.pk)
@@ -318,10 +319,8 @@ class UserViewSet(viewsets.ModelViewSet):
           1. EMPLOYEE only. Without this a branch manager could create a
              COMPANY_ADMIN and own the tenant, which is exactly the escalation
              `manageUsers` is floored to prevent.
-          2. Their own branches only. `branch_ids_for` is the same helper that
-             decides what they can SEE, so a manager cannot staff a branch they
-             do not run — and, for a head manager, cannot reach outside the
-             branch managers assigned to them.
+          2. Their managed branches only. A branch manager is limited to their
+             own branch; a head manager can staff any branch in their company.
         """
         actor = self.request.user
         role = validated_data.get('role', Role.EMPLOYEE)
@@ -1744,4 +1743,3 @@ class HealthView(APIView):
         except Exception:
             logger.error('Health check failed', exc_info=True)
             return Response({'status': 'degraded'}, status=503)
-

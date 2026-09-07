@@ -318,9 +318,8 @@ class AuthorizationMatrixTests(TestCase):
             Role.BRANCH_MANAGER: mk('branchmgr', Role.BRANCH_MANAGER, cls.kohima),
             Role.EMPLOYEE: mk('employee', Role.EMPLOYEE, cls.kohima),
         }
-        # The head manager oversees Kohima, so the Kohima fixtures are inside
-        # their write scope and a 403 there is the permission class talking
-        # rather than the queryset hiding the row.
+        # Legacy reporting links remain populated for compatibility; the head
+        # manager's effective scope is the full company.
         cls.users[Role.HEAD_MANAGER].managed_managers.set(
             [cls.users[Role.BRANCH_MANAGER]]
         )

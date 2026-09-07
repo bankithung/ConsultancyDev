@@ -41,5 +41,4 @@ header says HIT, MISS or DISABLED), and none of them is paginated.
   briefly. That is the cache, not the data.
 - A branch manager's "company total" is their branch total, and an employee's is their own
   records. Always say whose numbers you are reporting; the endpoint will not.
-- Two scope changes are not part of the cache key and lag by up to the same 30 seconds:
-  accepting a record transfer, and changing which managers a head manager oversees.
+- Accepted record transfers may take up to 30 seconds to appear in cached totals.
