@@ -118,7 +118,7 @@ function PermissionsScreen() {
       setDraft({});
       toast.success(
         changes.length === 1 ? 'Permission updated' : `${changes.length} permissions updated`,
-        'Anyone signed in with an affected role gets the new access on their next request.'
+        'Applies to everyone with this role.'
       );
     },
   });
@@ -130,7 +130,7 @@ function PermissionsScreen() {
       invalidate();
       setDraft({});
       setConfirmReset(false);
-      toast.success('Back to the built-in defaults', 'Every override was removed.');
+      toast.success('Defaults restored');
     },
   });
 
@@ -245,11 +245,7 @@ function PermissionsScreen() {
         aria-checked={value}
         aria-label={`${ROLE_SHORT_LABELS[role]}: ${capability}`}
         disabled={locked}
-        // `title` is the hover explanation the brief asks for; the lock icon
-        // below carries the same information for touch and for anyone who
-        // never hovers, because a greyed control with no visible reason reads
-        // as a bug rather than a rule.
-        title={locked ? cell.reason : undefined}
+        title={locked ? (cell.source === 'platform' ? 'Always enabled for Platform.' : value ? 'Required for this role.' : 'Unavailable for this role.') : undefined}
         onClick={() => toggle(role, capability, cell)}
         className={[
           'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors',
@@ -306,14 +302,8 @@ function PermissionsScreen() {
   /* ------------------------------------------------------------------ render */
 
   return (
-    <div className="space-y-6">
-      <div className="min-w-0">
-        <h1 className="font-heading text-2xl font-bold text-slate-900">Roles &amp; Permissions</h1>
-        <p className="mt-1 font-body text-sm text-slate-600">
-          What each type of user can do. Granted to a role, never to one person — so a change
-          here applies to everyone who holds that role.
-        </p>
-      </div>
+    <div className="pt-1">
+      <h1 className="sr-only">Roles &amp; Permissions</h1>
 
       {/*
         One panel. Toolbar, legend, grid and footer all live inside it so the
@@ -369,21 +359,20 @@ function PermissionsScreen() {
         {/* Legend. Three words each, because the grid below is dense enough. */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 bg-slate-50/70 px-3 py-2 text-[11px] text-slate-500">
           <span>
-            <span className="font-semibold text-slate-700">default</span> — the built-in rule
+            <span className="font-semibold text-slate-700">default</span>
           </span>
           <span>
-            <span className="font-semibold text-teal-700">changed</span> — set by an admin here
+            <span className="font-semibold text-teal-700">changed</span>
           </span>
           <span className="inline-flex items-center gap-1">
-            <Lock size={11} className="text-slate-400" /> locked — hover or tap for the reason
+            <Lock size={11} className="text-slate-400" /> locked
           </span>
         </div>
 
         {isPlatformAdmin && companyId === null ? (
           <div className="p-6">
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
-              Permissions belong to a company. Choose one above to configure it — the grid below
-              shows the built-in defaults until you do.
+              Choose a company to edit permissions.
             </p>
           </div>
         ) : null}
@@ -401,7 +390,7 @@ function PermissionsScreen() {
             {refusal && (
               <div className="border-b border-red-100 bg-red-50 px-3 py-2.5">
                 <p className="text-sm font-semibold text-red-800">
-                  Nothing was saved — the whole change was refused.
+                  Changes weren’t saved.
                 </p>
                 <p className="mt-0.5 break-words text-sm text-red-700">{refusal}</p>
               </div>
@@ -436,15 +425,6 @@ function PermissionsScreen() {
                     <tr key={capability.value} className="hover:bg-slate-50/60">
                       <td className="px-4 py-3 align-top">
                         <p className="font-medium text-slate-900">{capability.label}</p>
-                        {capability.floor && (
-                          <p className="mt-0.5 flex items-start gap-1 text-xs text-slate-500">
-                            <Lock size={11} className="mt-0.5 shrink-0 text-slate-400" />
-                            <span>
-                              Never below {ROLE_SHORT_LABELS[capability.floor]}.{' '}
-                              {capability.protection_reason}
-                            </span>
-                          </p>
-                        )}
                       </td>
                       {data.roles.map((role) => {
                         const cell = data.matrix[role.value][capability.value];
@@ -470,7 +450,7 @@ function PermissionsScreen() {
                           <button
                             type="button"
                             onClick={() => revertRow(capability.value)}
-                            title="Return this permission to its built-in default"
+                            title="Reset permission"
                             aria-label={`Reset ${capability.label} to its default`}
                             className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
                           >
@@ -491,15 +471,6 @@ function PermissionsScreen() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-medium text-slate-900">{capability.label}</p>
-                      {capability.floor && (
-                        <p className="mt-0.5 flex items-start gap-1 text-xs text-slate-500">
-                          <Lock size={11} className="mt-0.5 shrink-0 text-slate-400" />
-                          <span>
-                            Never below {ROLE_SHORT_LABELS[capability.floor]}.{' '}
-                            {capability.protection_reason}
-                          </span>
-                        </p>
-                      )}
                     </div>
                     {rowIsOverridden(capability.value) && (
                       <button
@@ -516,11 +487,6 @@ function PermissionsScreen() {
                   <ul className="mt-2 space-y-1">
                     {data.roles.map((role) => {
                       const cell = data.matrix[role.value][capability.value];
-                      // Printed whenever the cell is pinned in EITHER direction,
-                      // not just the one it currently sits in: there is no
-                      // hover on a phone, so the rule has to be visible before
-                      // the tap that would be refused.
-                      const pinned = !cell.can_grant || !cell.can_revoke;
                       return (
                         <li key={role.value} className="rounded-md bg-slate-50/70 px-2.5 py-2">
                           <div className="flex items-center justify-between gap-3">
@@ -540,11 +506,6 @@ function PermissionsScreen() {
                               />
                             </div>
                           </div>
-                          {pinned && cell.reason && (
-                            <p className="mt-1 text-[11px] leading-snug text-slate-500">
-                              {cell.reason}
-                            </p>
-                          )}
                         </li>
                       );
                     })}
@@ -568,7 +529,7 @@ function PermissionsScreen() {
             <div className="sticky bottom-0 flex flex-col gap-2 border-t border-slate-200 bg-white/95 p-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-slate-600">
                 {pendingChanges.length === 0
-                  ? 'No unsaved changes.'
+                  ? 'No changes'
                   : `${pendingChanges.length} unsaved change${pendingChanges.length === 1 ? '' : 's'}.`}
               </p>
               <div className="flex gap-2">
@@ -610,8 +571,8 @@ function PermissionsScreen() {
         open={confirmReset}
         onClose={() => setConfirmReset(false)}
         onConfirm={() => resetMutation.mutate()}
-        title="Return every permission to its default?"
-        description="Every change made on this screen will be removed and the built-in rules take over again. People signed in now keep their current access until their next request."
+        title="Reset all permissions?"
+        description="Replace custom permissions with defaults for all roles."
         confirmText="Reset to defaults"
         confirmVariant="destructive"
         isLoading={resetMutation.isPending}

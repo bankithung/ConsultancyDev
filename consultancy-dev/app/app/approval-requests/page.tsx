@@ -11,18 +11,21 @@ import type { ApprovalRequest } from '@/lib/types';
  * against the wire value through this alias keeps the runtime correct until
  * lib/types is corrected — fe-infra has been told.
  */
+type ApprovalRow = ApprovalRequest & { requested_by_name?: string };
+
 type WireApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'FAILED';
 
 const wireStatus = (request: { status: string }): WireApprovalStatus =>
   request.status as WireApprovalStatus;
 
-import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
+import { loadAllPages } from '@/app/app/student-profile/aggregate';
+import { BookmarkTabs } from '@/components/common/BookmarkTabs';
+import { PaginationBar } from '@/components/common/PaginationBar';
+import { EmptyState, ErrorState, LoadingState, ErrorBanner } from '@/components/common/states';
 import { useAuthStore } from '@/store/authStore';
-import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Check, X, Clock, FileEdit, Trash2, User as UserIcon, AlertCircle } from 'lucide-react';
+import { Check, X, Clock, FileEdit, Trash2, User as UserIcon, AlertCircle, History } from 'lucide-react';
 import { format } from 'date-fns';
 import * as Dialog from '@radix-ui/react-dialog';
 import { toast } from '@/store/toastStore';
@@ -30,28 +33,18 @@ import { toast } from '@/store/toastStore';
 export default function ApprovalRequestsPage() {
     const { user } = useAuthStore();
     const queryClient = useQueryClient();
-    const [selectedRequest, setSelectedRequest] = useState<any | null>(null);
+    const [selectedRequest, setSelectedRequest] = useState<ApprovalRow | null>(null);
+    const [tab, setTab] = useState<'pending' | 'history'>('pending');
+    const [page, setPage] = useState(1);
     const [reviewNote, setReviewNote] = useState('');
     const [actionType, setActionType] = useState<'APPROVE' | 'REJECT' | null>(null);
 
-    // Redirect if not admin
-    if (user && user.role !== 'DEV_ADMIN' && user.role !== 'COMPANY_ADMIN') {
-        return (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-                <AlertCircle className="w-16 h-16 text-red-500 mb-4" />
-                <h1 className="text-2xl font-bold text-slate-900">Access Denied</h1>
-                <p className="text-slate-600 mt-2">You do not have permission to view this page.</p>
-            </div>
-        );
-    }
-
-    const requestsQuery = usePaginatedQuery<ApprovalRequest>(
-        ['approval-requests'],
-        apiClient.approvalRequests.list,
-        { pageSize: 100, ordering: '-created_at' },
-    );
-    const requests = requestsQuery.rows;
-    const isLoading = requestsQuery.isLoading;
+    const requestsQuery = useQuery({
+        queryKey: ['approval-requests', 'workspace'],
+        queryFn: () => loadAllPages<ApprovalRow>(apiClient.approvalRequests.list, { ordering: '-created_at' }, 200, 10),
+        enabled: user?.role === 'DEV_ADMIN' || user?.role === 'COMPANY_ADMIN',
+    });
+    const requests = requestsQuery.data ?? [];
 
     const approveMutation = useMutation({
         mutationFn: async ({ id, note }: { id: number; note: string }) => {
@@ -89,10 +82,12 @@ export default function ApprovalRequestsPage() {
         }
     });
 
-    const handleAction = (request: any, type: 'APPROVE' | 'REJECT') => {
+    const handleAction = (request: ApprovalRow, type: 'APPROVE' | 'REJECT') => {
         setSelectedRequest(request);
         setActionType(type);
         setReviewNote('');
+        approveMutation.reset();
+        rejectMutation.reset();
     };
 
     const handleSubmitReview = () => {
@@ -113,72 +108,55 @@ export default function ApprovalRequestsPage() {
 
     const pendingRequests = requests.filter((request) => wireStatus(request) === 'PENDING');
     const historyRequests = requests.filter((request) => wireStatus(request) !== 'PENDING');
+    const activeRequests = tab === 'pending' ? pendingRequests : historyRequests;
+    const pageSize = 20;
+    const pages = Math.max(1, Math.ceil(activeRequests.length / pageSize));
+    const currentPage = Math.min(page, pages);
+    const visibleRequests = activeRequests.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-    if (isLoading) {
-        return <div className="flex items-center justify-center min-h-screen"><div className="animate-pulse text-slate-500">Loading requests...</div></div>;
+    // Redirect if not admin
+    if (user && user.role !== 'DEV_ADMIN' && user.role !== 'COMPANY_ADMIN') {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+                <AlertCircle className="w-16 h-16 text-red-500 mb-4" />
+                <h1 className="text-2xl font-bold text-slate-900">Access Denied</h1>
+                <p className="text-slate-600 mt-2">You do not have permission to view this page.</p>
+            </div>
+        );
     }
 
     return (
-        <div className="space-y-6">
-            <div>
-                <h1 className="text-2xl font-bold text-slate-900 font-heading">Approval Requests</h1>
-                <p className="text-sm text-slate-600 mt-1 font-body">Review and manage delete/update requests from employees</p>
-            </div>
-
-            <Tabs defaultValue="pending" className="w-full">
-                <TabsList className="grid w-full max-w-md grid-cols-2 h-auto">
-                    <TabsTrigger value="pending" className="relative">
-                        Pending
-                        {pendingRequests.length > 0 && (
-                            <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white">
-                                {pendingRequests.length}
-                            </span>
+        <div className="pt-1">
+            <h1 className="sr-only">Approvals</h1>
+            <BookmarkTabs
+                aria-label="Approval requests"
+                tabs={[{ value: 'pending', label: 'Pending', icon: Clock }, { value: 'history', label: 'History', icon: History }]}
+                value={tab}
+                onChange={(next) => { setTab(next); setPage(1); }}
+            />
+            <section role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                {requestsQuery.isError ? <div className="p-4"><ErrorState error={requestsQuery.error} onRetry={() => requestsQuery.refetch()} /></div> : requestsQuery.isLoading ? <div className="p-4"><LoadingState rows={3} label="Loading requests" /></div> : (
+                    <>
+                        {requests.length >= 2000 && <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800">Showing the latest 2,000 requests.</p>}
+                        {visibleRequests.length === 0 ? (
+                            <div className="px-4 py-8">
+                                <EmptyState icon={tab === 'pending' ? Check : History} title={tab === 'pending' ? 'No pending requests' : 'No history yet'} description={tab === 'pending' ? 'You’re all caught up.' : 'Reviewed requests appear here.'} />
+                            </div>
+                        ) : (
+                            <div className="divide-y divide-slate-100">
+                                {visibleRequests.map((request) => <RequestCard key={request.id} request={request} isHistory={tab === 'history'} onApprove={() => handleAction(request, 'APPROVE')} onReject={() => handleAction(request, 'REJECT')} />)}
+                            </div>
                         )}
-                    </TabsTrigger>
-                    <TabsTrigger value="history">History</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="pending" className="mt-6">
-                    {pendingRequests.length === 0 ? (
-                        <Card className="border-dashed border-2 border-slate-200 bg-slate-50">
-                            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                                <Check className="w-12 h-12 text-green-500 mb-4 bg-green-100 p-2 rounded-full" />
-                                <h3 className="text-lg font-medium text-slate-900">All Caught Up!</h3>
-                                <p className="text-slate-500 mt-1">There are no pending requests to review.</p>
-                            </CardContent>
-                        </Card>
-                    ) : (
-                        <div className="grid gap-4">
-                            {pendingRequests.map((request: any) => (
-                                <RequestCard
-                                    key={request.id}
-                                    request={request}
-                                    onApprove={() => handleAction(request, 'APPROVE')}
-                                    onReject={() => handleAction(request, 'REJECT')}
-                                />
-                            ))}
-                        </div>
-                    )}
-                </TabsContent>
-
-                <TabsContent value="history" className="mt-6">
-                    {historyRequests.length === 0 ? (
-                        <div className="text-center py-12 text-slate-500">No history available</div>
-                    ) : (
-                        <div className="grid gap-4">
-                            {historyRequests.map((request: any) => (
-                                <RequestCard key={request.id} request={request} isHistory />
-                            ))}
-                        </div>
-                    )}
-                </TabsContent>
-            </Tabs>
+                        {activeRequests.length > 0 && <PaginationBar page={currentPage} pages={pages} count={activeRequests.length} pageSize={pageSize} onPageChange={setPage} isLoading={requestsQuery.isFetching} />}
+                    </>
+                )}
+            </section>
 
             {/* Review Modal */}
             <Dialog.Root open={!!selectedRequest} onOpenChange={handleCloseModal}>
                 <Dialog.Portal>
                     <Dialog.Overlay className="fixed inset-0 bg-black/50 z-50" />
-                    <Dialog.Content className="fixed left-[50%] top-[50%] max-h-[85vh] w-[90vw] max-w-[500px] translate-x-[-50%] translate-y-[-50%] rounded-xl bg-white p-6 shadow-xl focus:outline-none z-50 border border-slate-200">
+                    <Dialog.Content className="fixed left-[50%] top-[50%] max-h-[85vh] w-[90vw] max-w-[500px] translate-x-[-50%] translate-y-[-50%] overflow-y-auto rounded-xl bg-white p-6 shadow-xl focus:outline-none z-50 border border-slate-200">
                         {selectedRequest && (
                             <>
                                 <Dialog.Title className="text-xl font-bold text-slate-900 mb-1 font-heading flex items-center gap-2">
@@ -202,12 +180,12 @@ export default function ApprovalRequestsPage() {
                                             <span className="font-medium text-slate-900">{selectedRequest.entity_type}</span>
                                         </div>
                                         <p className="text-sm text-slate-700 font-medium">{selectedRequest.entity_name}</p>
-                                        <p className="text-xs text-slate-500 mt-2">Reason: "{selectedRequest.message}"</p>
+                                        <p className="text-xs text-slate-500 mt-2">Reason: {selectedRequest.message}</p>
                                     </div>
 
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-2">
-                                            Review Note (Optional)
+                                            Note (optional)
                                         </label>
                                         <textarea
                                             className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
@@ -218,6 +196,7 @@ export default function ApprovalRequestsPage() {
                                         />
                                     </div>
 
+                                    <ErrorBanner error={approveMutation.error || rejectMutation.error} />
                                     <div className="flex gap-3 justify-end mt-4">
                                         <Button variant="outline" onClick={handleCloseModal}>
                                             Cancel
@@ -227,7 +206,7 @@ export default function ApprovalRequestsPage() {
                                             onClick={handleSubmitReview}
                                             disabled={approveMutation.isPending || rejectMutation.isPending}
                                         >
-                                            {actionType === 'APPROVE' ? 'Confirm Approval' : 'Confirm Rejection'}
+                                            {actionType === 'APPROVE' ? 'Approve request' : 'Reject request'}
                                         </Button>
                                     </div>
                                 </div>
@@ -240,17 +219,13 @@ export default function ApprovalRequestsPage() {
     );
 }
 
-function RequestCard({ request, onApprove, onReject, isHistory }: any) {
+function RequestCard({ request, onApprove, onReject, isHistory }: { request: ApprovalRow; onApprove?: () => void; onReject?: () => void; isHistory?: boolean }) {
     const isDelete = request.action === 'DELETE';
 
     return (
-        <Card className={`border-l-4 ${wireStatus(request) === 'APPROVED' ? 'border-l-green-500' :
-            wireStatus(request) === 'REJECTED' ? 'border-l-red-500' :
-                isDelete ? 'border-l-red-500' : 'border-l-blue-500'
-            }`}>
-            <CardContent className="p-5">
+        <article className="p-4 sm:p-5">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="space-y-2">
+                    <div className="min-w-0 flex-1 space-y-2">
                         <div className="flex items-center gap-2">
                             <Badge variant={isDelete ? 'destructive' : 'secondary'} className="uppercase">
                                 {isDelete ? <Trash2 className="w-3 h-3 mr-1" /> : <FileEdit className="w-3 h-3 mr-1" />}
@@ -267,8 +242,8 @@ function RequestCard({ request, onApprove, onReject, isHistory }: any) {
                         </div>
 
                         <div>
-                            <h3 className="text-lg font-semibold text-slate-900">{request.entity_name}</h3>
-                            <div className="flex items-center gap-2 text-sm text-slate-500 mt-1">
+                            <h3 className="break-words text-sm font-semibold text-slate-900">{request.entity_name}</h3>
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1">
                                 <UserIcon className="w-4 h-4" />
                                 <span>Requested by <span className="font-medium text-slate-700">{request.requested_by_name || 'Employee'}</span></span>
                                 <span>•</span>
@@ -277,14 +252,14 @@ function RequestCard({ request, onApprove, onReject, isHistory }: any) {
                             </div>
                         </div>
 
-                        <div className="bg-slate-50 p-3 rounded-md text-sm text-slate-700 border border-slate-100">
+                        <div className="break-words text-sm text-slate-600">
                             <span className="font-medium text-slate-900">Reason: </span>
                             {request.message}
                         </div>
 
                         {isHistory && request.review_note && (
                             <div className="text-xs text-slate-500 italic">
-                                Admin Note: {request.review_note}
+                                Review note: {request.review_note}
                             </div>
                         )}
                     </div>
@@ -309,7 +284,6 @@ function RequestCard({ request, onApprove, onReject, isHistory }: any) {
                         </div>
                     )}
                 </div>
-            </CardContent>
-        </Card>
+        </article>
     );
 }

@@ -39,7 +39,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/app/settings': 'Settings',
   '/app/profile': 'My Profile',
   '/app/notifications': 'Notifications',
-  '/app/approval-requests': 'Approval Requests',
+  '/app/approval-requests': 'Approvals',
   '/app/my-requests': 'My Requests',
   '/app/chat': 'Chat',
   '/app/student-profile': 'Student Profile',
@@ -64,7 +64,6 @@ const PAGE_SUBTITLES: Record<string, string> = {
   '/app/settings': 'Manage your company profile and preferences',
   '/app/profile': 'View and edit your profile',
   '/app/notifications': 'Stay updated with important events',
-  '/app/approval-requests': 'Review delete/update requests',
   '/app/my-requests': 'Track status of your approval requests',
   '/app/chat': 'Team communication',
 };
