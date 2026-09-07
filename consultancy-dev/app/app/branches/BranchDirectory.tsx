@@ -41,7 +41,11 @@ export function BranchDirectory() {
   const allBranches = useMemo(() => branches.data ?? [], [branches.data]);
   const allMembers = useMemo(() => roster.data ?? [], [roster.data]);
   const rosterComplete = roster.isSuccess && !roster.isError && allMembers.length < 2000;
-  const membersFor = (branch: Branch) => allMembers.filter((user) => user.company === branch.company && user.branch === branch.id && user.role !== 'HEAD_MANAGER' && user.role !== 'DEV_ADMIN');
+  const membersFor = (branch: Branch) => allMembers.filter((user) =>
+    user.company === branch.company
+    && user.branch === branch.id
+    && (user.role === 'EMPLOYEE' || user.role === 'BRANCH_MANAGER'),
+  );
   const managersFor = (branch: Branch) => membersFor(branch).filter((user) => user.role === 'BRANCH_MANAGER' && user.is_active && user.is_active_employee);
   const visibleBranches = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -95,7 +99,7 @@ export function BranchDirectory() {
                   <span className="block break-words text-sm font-semibold text-slate-900">{branch.name}</span>
                   <span className="mt-0.5 block truncate text-xs text-slate-500">{[branch.code, branch.city].filter(Boolean).join(' · ') || branch.company_name}</span>
                   <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
-                    <span>{rosterComplete ? membersFor(branch).length : branch.user_count} members</span>
+                    <span>{rosterComplete ? membersFor(branch).length : branch.user_count} {((rosterComplete ? membersFor(branch).length : branch.user_count) === 1) ? 'member' : 'members'}</span>
                     {branch.is_default && <span className="text-teal-700">Default</span>}
                     {!branch.is_active && <span>Inactive</span>}
                     {needsManager && <span className="inline-flex items-center gap-1 text-amber-700"><AlertTriangle size={11} /> No branch manager</span>}
@@ -113,7 +117,7 @@ export function BranchDirectory() {
       <section id="selected-branch-members" aria-label="Branch members" className="min-w-0" data-testid="branch-members">
         {selected ? <>
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
-            <div className="min-w-0"><h2 className="break-words text-sm font-semibold text-slate-900">{selected.name}</h2><p className="mt-0.5 text-xs text-slate-500">Members and roles</p></div>
+            <div className="min-w-0"><h2 className="break-words text-sm font-semibold text-slate-900">{selected.name}</h2><p className="mt-0.5 text-xs text-slate-500">{currentMembers.length} {currentMembers.length === 1 ? 'member' : 'members'}</p></div>
             <div className="flex items-center gap-1">
               {canManageMembers && <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setAssignment({ branch: selected })}><Plus size={14} className="mr-1" /> Assign member</Button>}
               {canManageBranches && <><Button size="sm" variant="ghost" className="h-8 w-8 p-0" aria-label={`Edit ${selected.name}`} onClick={() => openBranchForm(selected)}><Pencil size={14} /></Button><Button size="sm" variant="ghost" className="h-8 w-8 p-0" disabled={selected.is_default} aria-label={`${selected.is_active ? 'Deactivate' : 'Activate'} ${selected.name}`} title={selected.is_default ? 'Default branch stays active' : undefined} onClick={() => setToggleTarget(selected)}><Power size={14} /></Button></>}
@@ -126,23 +130,22 @@ export function BranchDirectory() {
             </div>
           </div>
           {roster.isError ? <div className="p-4"><ErrorState error={roster.error} onRetry={() => roster.refetch()} /></div> : roster.isLoading ? <div className="p-4"><LoadingState rows={3} label="Loading members" /></div> : <>
-            {missingManager && <div role="status" className="mx-4 mt-4 flex gap-2 rounded-md bg-amber-50 px-3 py-2.5 text-xs text-amber-800"><AlertTriangle size={15} className="shrink-0" /><p>No active branch manager. Assign one when ready.</p></div>}
+            {missingManager && <div role="status" className="mx-4 mt-4 flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2.5 text-xs text-amber-800"><AlertTriangle size={15} className="shrink-0" /><p className="flex-1">Branch manager not assigned.</p>{canManageMembers && <button type="button" className="shrink-0 font-semibold text-amber-900 underline" onClick={() => setAssignment({ branch: selected, role: 'BRANCH_MANAGER' })}>Assign manager</button>}</div>}
             {!rosterComplete && <p className="px-4 pt-3 text-xs text-amber-700">Member list may be incomplete. Manager status unavailable.</p>}
-            <div className="flex items-center gap-3 p-4"><div className="relative min-w-0 flex-1"><Search size={14} className="absolute left-3 top-2.5 text-slate-400" /><Input aria-label="Search branch members" className="h-9 pl-8 text-xs" placeholder="Search members…" value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} /></div><span className="shrink-0 text-xs text-slate-500">{currentMembers.length} members</span></div>
+            {currentMembers.length > 0 && <div className="flex items-center gap-3 p-4"><div className="relative min-w-0 flex-1"><Search size={14} className="absolute left-3 top-2.5 text-slate-400" /><Input aria-label="Search branch members" className="h-9 pl-8 text-xs" placeholder="Search members…" value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} /></div></div>}
             <ul className="max-h-[480px] divide-y divide-slate-100 overflow-y-auto">
               {filteredMembers.map((member) => <li key={member.id} className="flex items-center gap-3 px-4 py-3">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-teal-50 text-xs font-semibold text-teal-700">{(member.full_name || member.username).slice(0, 1).toUpperCase()}</span>
                 <div className="min-w-0 flex-1"><Link href={`/app/team/${member.id}`} className="block truncate text-sm font-medium text-slate-900 hover:text-teal-700 hover:underline">{member.full_name || member.username}</Link><p className="mt-0.5 truncate text-xs text-slate-500">{member.email}</p><div className="mt-1 flex flex-wrap items-center gap-2"><Badge className={`border-0 text-[10px] ${member.role === 'BRANCH_MANAGER' ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-600'}`}>{ROLE_LABELS[member.role]}</Badge>{(!member.is_active || !member.is_active_employee) && <span className="text-[10px] text-slate-400">Inactive</span>}</div></div>
                 {canManageMembers && <Button variant="ghost" size="sm" className="h-8 shrink-0 text-xs text-teal-700" aria-label={`Manage ${member.full_name || member.username}`} onClick={() => setAssignment({ branch: selected, user: member })}>Manage</Button>}
               </li>)}
-              {filteredMembers.length === 0 && <li className="px-4 py-12 text-center"><Users size={24} className="mx-auto mb-2 text-slate-300" /><p className="text-sm font-medium text-slate-600">{memberSearch ? 'No matching members' : 'No members assigned'}</p><p className="mt-1 text-xs text-slate-500">{memberSearch ? 'Try another name or email.' : 'Assign an existing team member.'}</p></li>}
+              {filteredMembers.length === 0 && <li className="px-4 py-12 text-center"><Users size={24} className="mx-auto mb-2 text-slate-300" /><p className="text-sm font-medium text-slate-600">{memberSearch ? 'No matching members' : 'No branch members'}</p><p className="mt-1 text-xs text-slate-500">{memberSearch ? 'Try another name or email.' : 'Assign an employee to this branch.'}</p>{!memberSearch && canManageMembers && <Button size="sm" className="mt-4 bg-teal-600 hover:bg-teal-700" onClick={() => setAssignment({ branch: selected })}><Plus size={14} className="mr-1" /> Assign member</Button>}</li>}
             </ul>
-            <div className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">Need a new account? <Link href="/app/team?tab=members" className="font-medium text-teal-700 hover:underline">Add a member in Team</Link></div>
           </>}
         </> : <div className="flex min-h-72 flex-col items-center justify-center p-6 text-center"><Building2 size={28} className="mb-3 text-slate-300" /><p className="text-sm text-slate-500">{branches.isLoading ? 'Loading branches…' : 'Select a branch to view members.'}</p></div>}
       </section>
       {branchForm && <BranchFormDrawer key={branchForm.key} open branch={branchForm.branch} onClose={() => setBranchForm(null)} />}
-      {assignment && <BranchMembersDialog branch={assignment.branch} initialUser={assignment.user} initialRole={assignment.role} startAssigning={!assignment.user} onClose={() => setAssignment(null)} />}
+      {assignment && <BranchMembersDialog branch={assignment.branch} initialUser={assignment.user} initialRole={assignment.role} onClose={() => setAssignment(null)} />}
       <ConfirmDialog open={!!toggleTarget} onClose={() => setToggleTarget(null)} onConfirm={() => toggleTarget && toggle.mutate(toggleTarget)} title={toggleTarget?.is_active ? 'Deactivate branch?' : 'Activate branch?'} description={toggleTarget?.is_active ? 'Existing members and records are kept.' : 'Allow new records and assignments.'} confirmText={toggleTarget?.is_active ? 'Deactivate' : 'Activate'} confirmVariant={toggleTarget?.is_active ? 'destructive' : 'default'} isLoading={toggle.isPending} />
       {toggle.isError && <div className="p-4 lg:col-span-2"><ErrorBanner error={toggle.error} onDismiss={() => toggle.reset()} /></div>}
     </div>
