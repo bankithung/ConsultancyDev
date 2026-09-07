@@ -21,7 +21,7 @@ const wireStatus = (request: { status: string }): WireApprovalStatus =>
 import { loadAllPages } from '@/app/app/student-profile/aggregate';
 import { BookmarkTabs } from '@/components/common/BookmarkTabs';
 import { PaginationBar } from '@/components/common/PaginationBar';
-import { EmptyState, ErrorState, LoadingState, ErrorBanner } from '@/components/common/states';
+import { ErrorState, LoadingState, ErrorBanner } from '@/components/common/states';
 import { useAuthStore } from '@/store/authStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -139,8 +139,12 @@ export default function ApprovalRequestsPage() {
                     <>
                         {requests.length >= 2000 && <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800">Showing the latest 2,000 requests.</p>}
                         {visibleRequests.length === 0 ? (
-                            <div className="px-4 py-8">
-                                <EmptyState icon={tab === 'pending' ? Check : History} title={tab === 'pending' ? 'No pending requests' : 'No history yet'} description={tab === 'pending' ? 'You’re all caught up.' : 'Reviewed requests appear here.'} />
+                            <div className="flex flex-col items-center px-4 py-16 text-center">
+                                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-50 text-slate-400">
+                                    {tab === 'pending' ? <Check size={20} /> : <History size={20} />}
+                                </span>
+                                <h2 className="mt-3 text-sm font-semibold text-slate-900">{tab === 'pending' ? 'No pending requests' : 'No history yet'}</h2>
+                                <p className="mt-1 text-xs text-slate-500">{tab === 'pending' ? 'You’re all caught up.' : 'Reviewed requests appear here.'}</p>
                             </div>
                         ) : (
                             <div className="divide-y divide-slate-100">
