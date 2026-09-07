@@ -1,7 +1,7 @@
 {% extends 'core/oauth/base.html' %}{% block content %}
-<h1>Sign in to connect</h1><p>Use your consultancy account to connect your AI assistant.</p>
+<h1>Sign in to connect</h1><p>Use your Consultancy Dev account.</p>
 <form method="post">{% csrf_token %}{{ form.non_field_errors }}
 <label for="id_username">Username or email</label>{{ form.username }}{{ form.username.errors }}
 <label for="id_password">Password</label>{{ form.password }}{{ form.password.errors }}
 <input type="hidden" name="next" value="{{ next }}"><div class="actions"><button type="submit">Sign in</button></div></form>
-<p class="small">You’ll review the requested access before connecting.</p>{% endblock %}
+<p class="footnote">Review access before you connect.</p>{% endblock %}

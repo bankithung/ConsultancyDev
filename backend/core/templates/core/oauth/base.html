@@ -1,3 +1,40 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Consultancy Dev</title><style>
-*{box-sizing:border-box}body{margin:0;background:#f5f8fa;color:#172b3e;font:15px/1.6 system-ui,sans-serif;display:grid;min-height:100vh;place-items:center;padding:20px}main{background:white;border:1px solid #e1e7ec;border-radius:16px;max-width:480px;width:100%;padding:32px;box-shadow:0 8px 30px #142b3e08}.brand{color:#009e91;font-weight:700}h1{font-size:23px;line-height:1.3;margin:16px 0}p{color:#58697a}label{display:block;margin-top:14px;font-size:13px;font-weight:600}input:not([type=hidden]){width:100%;border:1px solid #ccd6df;border-radius:8px;padding:11px;font:inherit}button,.button{display:inline-block;border:0;border-radius:8px;padding:11px 16px;background:#009e91;color:white;font:600 14px system-ui;cursor:pointer;text-decoration:none}.secondary{background:#eef2f6;color:#334155}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}a{color:#007d73}.errorlist{color:#b42318;padding-left:20px}.account{background:#f4f8fa;border-radius:8px;padding:12px;overflow-wrap:anywhere}.small{font-size:12px}ul{padding-left:20px}input:focus,button:focus-visible,a:focus-visible{outline:2px solid #009e91;outline-offset:3px}
-</style></head><body><main><div class="brand">Consultancy Dev</div>{% block content %}{% endblock %}</main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}Connect · Consultancy Dev{% endblock %}</title>
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:32px 20px;background:#f7f8fa;color:#17232d;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+    main{width:100%;max-width:432px;background:#fff;border:1px solid #e7ebee;border-radius:20px;padding:32px;box-shadow:0 12px 40px #17232d06}
+    .brand{display:flex;align-items:center;gap:8px;margin-bottom:28px;color:#0f766e;font-size:13px;font-weight:650;letter-spacing:-.15px}
+    .brand-dot{width:6px;height:6px;border-radius:50%;background:#0f766e}
+    h1{margin:0 0 8px;font-size:25px;line-height:1.25;font-weight:650;letter-spacing:-.8px}
+    p{margin:8px 0 0;color:#64717d}
+    .app-logo{display:block;width:56px;height:56px;object-fit:contain;margin:0 0 18px;border:1px solid #edf0f2;border-radius:14px}
+    .account{display:flex;align-items:center;gap:12px;border:1px solid #e7ebee;border-radius:12px;padding:13px 14px;margin:24px 0;min-width:0}
+    .avatar{display:grid;place-items:center;flex-shrink:0;width:36px;height:36px;border-radius:50%;background:#e9f4f2;color:#0f766e;font-size:14px;font-weight:600}
+    .account-copy{min-width:0;overflow-wrap:anywhere}.account strong{font-size:13px;font-weight:600}.account p{margin:2px 0 0;font-size:12px}
+    .eyebrow{margin:0 0 12px;font-size:11px;letter-spacing:1px;font-weight:600;text-transform:uppercase;color:#71808d}
+    .permissions{list-style:none;margin:0;padding:0}.permissions li{display:flex;align-items:flex-start;gap:10px;margin:10px 0;color:#334155;font-size:13px}.permissions svg{width:16px;height:16px;margin-top:2px;flex-shrink:0;color:#0f766e}
+    .scope-note{font-size:12px;margin-top:12px;color:#71808d}
+    label{display:block;margin:16px 0 6px;font-size:12px;font-weight:600}
+    input:not([type=hidden]){width:100%;border:1px solid #dce3e8;border-radius:9px;padding:11px 12px;background:#fff;color:#17232d;font:inherit}
+    button,.button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;border:1px solid transparent;border-radius:9px;padding:11px 18px;background:#0f766e;color:#fff;font:600 13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:pointer;text-decoration:none;transition:background .15s}
+    button:hover,.button:hover{background:#115e59}.secondary{background:#fff;border-color:#dce3e8;color:#445260}.secondary:hover{background:#f7f8fa}
+    .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}.actions>button{flex:1}.consent-actions{display:grid;grid-template-columns:1fr 1fr}
+    a{color:#0f766e;text-underline-offset:3px}.small{font-size:12px}.footnote{border-top:1px solid #edf0f2;padding-top:18px;margin-top:24px;text-align:center;font-size:11px;color:#7b8790}
+    .errorlist{color:#b42318;font-size:13px;padding-left:20px;overflow-wrap:anywhere}
+    input:focus,button:focus-visible,a:focus-visible{outline:2px solid #0f766e;outline-offset:3px}
+    @media(max-width:480px){body{padding:20px 16px}main{padding:24px;border-radius:16px}.brand{margin-bottom:24px}h1{font-size:24px}}
+    @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand"><span class="brand-dot" aria-hidden="true"></span>Consultancy Dev</div>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

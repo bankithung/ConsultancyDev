@@ -34,6 +34,19 @@ class McpOAuthTests(TestCase):
         params.update(overrides)
         return params
 
+    def test_branded_consent_preserves_access_description_and_cancellation(self):
+        self.app.client_id = 'consultancy-chatgpt'
+        self.app.save(update_fields=['client_id'])
+        params = self.auth_params()
+        page = self.client.get('/oauth/authorize/', params, secure=True)
+        self.assertContains(page, 'ChatGPT logo')
+        self.assertContains(page, 'Create, edit and delete records')
+        self.assertContains(page, 'Limited to your company and role permissions.')
+        denied = self.client.post('/oauth/authorize/', params, secure=True)
+        self.assertEqual(denied.status_code, 302)
+        self.assertEqual(parse_qs(urlsplit(denied['Location']).query)['error'], ['access_denied'])
+        self.assertFalse(AccessToken.objects.filter(user=self.user).exists())
+
     def code(self):
         params = self.auth_params()
         page = self.client.get('/oauth/authorize/', params, secure=True)
