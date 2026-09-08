@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-08T01:20:44.316214+00:00",
+  "generated_at": "2026-09-08T01:55:11.398852+00:00",
   "resources": [
     {
       "prefix": "agents",
@@ -1094,6 +1094,17 @@
           "choices": null,
           "max_length": null,
           "related_model": null,
+          "help": ""
+        },
+        {
+          "name": "assigned_reviewer",
+          "type": "id",
+          "required": false,
+          "read_only": false,
+          "write_only": false,
+          "choices": null,
+          "max_length": null,
+          "related_model": "User",
           "help": ""
         }
       ],
@@ -7275,6 +7286,17 @@
           "help": ""
         },
         {
+          "name": "pending_approval",
+          "type": "computed",
+          "required": false,
+          "read_only": true,
+          "write_only": false,
+          "choices": null,
+          "max_length": null,
+          "related_model": null,
+          "help": ""
+        },
+        {
           "name": "company",
           "type": "id",
           "required": false,
@@ -7435,6 +7457,38 @@
           },
           "query": {},
           "response": "{\"reordered\": n, \"requested\": m}",
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
+        },
+        {
+          "name": "request_status",
+          "tool_name": "request_status_task",
+          "method": "POST",
+          "detail": true,
+          "path": "tasks/{id}/request-status/",
+          "description": "Request a task status change or edit the caller\u2019s pending request. Status stays unchanged until manager approval.",
+          "body": {
+            "status": "Todo | In Progress | Done",
+            "message": "required progress update",
+            "assigned_reviewer": "required reviewer user id"
+          },
+          "query": {},
+          "response": "ApprovalRequest object",
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": false
+        },
+        {
+          "name": "reviewers",
+          "tool_name": "reviewers_task",
+          "method": "GET",
+          "detail": true,
+          "path": "tasks/{id}/reviewers/",
+          "description": "Active eligible reviewers for a task: its branch managers, head managers and company admins.",
+          "body": {},
+          "query": {},
+          "response": "Array of {id, name, role}",
           "skip_generated": false,
           "destructive": false,
           "idempotent": false

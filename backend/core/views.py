@@ -799,6 +799,51 @@ class TaskViewSet(ScopedModelViewSet):
     search_fields = ('title', 'description')
     ordering_fields = ('due_date', 'priority', 'status', 'position')
 
+    def _reviewers(self, task):
+        return User.objects.filter(company_id=task.company_id, is_active=True,
+            is_active_employee=True).filter(Q(role__in=[Role.COMPANY_ADMIN, Role.HEAD_MANAGER]) |
+            Q(role=Role.BRANCH_MANAGER, branch_id=task.branch_id)).exclude(pk=self.request.user.pk)
+
+    @action(detail=True, methods=['get'])
+    def reviewers(self, request, pk=None):
+        return Response([{'id': u.pk, 'name': u.get_full_name() or u.username, 'role': u.role}
+            for u in self._reviewers(self.get_object()) if u.is_company_admin or role_has(u, Capability.REVIEW_APPROVALS)])
+
+    @action(detail=True, methods=['post'], url_path='request-status')
+    @transaction.atomic
+    def request_status(self, request, pk=None):
+        task = self.get_queryset().select_for_update(of=('self',)).get(pk=self.get_object().pk)
+        target = request.data.get('status')
+        message = str(request.data.get('message', '')).strip()
+        if target not in ('Todo', 'In Progress', 'Done') or target == task.status:
+            raise ValidationError({'status': 'Choose a different task status.'})
+        if not message:
+            raise ValidationError({'message': 'Describe your progress before requesting approval.'})
+        reviewer_id = request.data.get('assigned_reviewer')
+        if not str(reviewer_id).isdigit():
+            raise ValidationError({'assigned_reviewer': 'Choose a reviewer.'})
+        reviewer = self._reviewers(task).filter(pk=reviewer_id).first()
+        if not reviewer or not (reviewer.is_company_admin or role_has(reviewer, Capability.REVIEW_APPROVALS)):
+            raise ValidationError({'assigned_reviewer': 'Choose an active reviewer for this branch.'})
+        pending = ApprovalRequest.objects.select_for_update().filter(company_id=task.company_id,
+            entity_type='task', entity_id=task.pk, action='UPDATE', status='PENDING').first()
+        if pending and pending.requested_by_id != request.user.pk:
+            raise ValidationError({'error': 'This task already has a pending request.'})
+        values = dict(entity_name=task.title, message=message,
+            pending_changes={'status': target, '_from_status': task.status, '_task_description': task.description},
+            branch_id=task.branch_id, assigned_reviewer=reviewer)
+        if pending:
+            for key, value in values.items():
+                setattr(pending, key, value)
+            pending.save()
+        else:
+            pending = ApprovalRequest.objects.create(company_id=task.company_id,
+                entity_type='task', entity_id=task.pk, action='UPDATE', requested_by=request.user, **values)
+        from .signals import notify
+        notify([reviewer], 'Task status approval', f'{task.title}: {task.status} → {target}. {message}',
+            action_url='/app/approval-requests')
+        return Response(ApprovalRequestSerializer(pending).data)
+
     @action(detail=False, methods=['post'])
     @transaction.atomic
     def reorder(self, request):
@@ -818,6 +863,10 @@ class TaskViewSet(ScopedModelViewSet):
             raise ValidationError({'ids': 'Provide an ordered list of task ids.'})
 
         scoped = {t.pk: t for t in self.get_queryset().filter(pk__in=ids)}
+        if new_status and new_status not in ('Todo', 'In Progress', 'Done'):
+            raise ValidationError({'status': 'Invalid task status.'})
+        if request.user.is_employee and new_status and any(t.status != new_status for t in scoped.values()):
+            raise PermissionDenied('Request approval to change task status.')
         updated = []
         for index, raw_id in enumerate(ids):
             task = scoped.get(raw_id)
@@ -1169,6 +1218,7 @@ class RecordTransferViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(transfer).data)
 
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def reject(self, request, pk=None):
         transfer = self.get_object()
         if transfer.to_user_id != request.user.id:
@@ -1269,6 +1319,7 @@ class SignupRequestViewSet(viewsets.ModelViewSet):
         return Response({'status': 'approved', 'company': company.id, 'user': admin.id})
 
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def reject(self, request, pk=None):
         signup = self.get_object()
         if signup.status != 'Pending':
@@ -1328,6 +1379,25 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
             branch_id=target_branch or user.branch_id,
         )
 
+    def update(self, request, *args, **kwargs):
+        raise PermissionDenied('Edit task requests from the task board.')
+
+    def destroy(self, request, *args, **kwargs):
+        if not request.user.is_company_admin and not request.user.is_dev_admin:
+            raise PermissionDenied('Only company admins can delete approval history.')
+        return super().destroy(request, *args, **kwargs)
+
+    def _check_task_reviewer(self, approval, reviewer):
+        if approval.entity_type != 'task' or approval.action != 'UPDATE':
+            return
+        if reviewer.is_company_admin or reviewer.is_dev_admin:
+            return
+        if reviewer.pk == approval.requested_by_id or reviewer.role not in (Role.HEAD_MANAGER, Role.BRANCH_MANAGER):
+            raise PermissionDenied('A manager must review this task.')
+        if reviewer.is_branch_manager and (reviewer.branch_id != approval.branch_id or
+                approval.assigned_reviewer_id != reviewer.pk):
+            raise PermissionDenied('This task request is assigned to another reviewer.')
+
     def _require_reviewer(self):
         """
         Reviewing is `reviewApprovals`, resolved through the company's matrix.
@@ -1338,7 +1408,7 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
         could review would be approving their own requests.
         """
         user = self.request.user
-        if not role_has(user, Capability.REVIEW_APPROVALS):
+        if not (user.is_company_admin or user.is_dev_admin) and not role_has(user, Capability.REVIEW_APPROVALS):
             raise PermissionDenied('Your role cannot review approval requests.')
         return user
 
@@ -1376,7 +1446,11 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
         left an audit trail asserting something that never happened).
         """
         reviewer = self._require_reviewer()
-        approval = self.get_object()
+        candidate = self.get_object()
+        if candidate.entity_type == 'task':
+            Task.objects.select_for_update().filter(pk=candidate.entity_id, company_id=candidate.company_id).first()
+        approval = self.get_queryset().select_for_update(of=('self',)).get(pk=candidate.pk)
+        self._check_task_reviewer(approval, reviewer)
         if approval.status != ApprovalRequest.Status.PENDING:
             raise ValidationError({'error': 'This request has already been reviewed.'})
 
@@ -1400,6 +1474,13 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
             )
             raise PermissionDenied('You cannot act on that record.')
 
+        if approval.entity_type == 'task' and approval.action == 'UPDATE':
+            obj = Task.objects.select_for_update().get(pk=obj.pk)
+            if obj.status != approval.pending_changes.get('_from_status', obj.status):
+                raise ValidationError({'error': 'Task status changed. Ask the employee to update the request.'})
+            if approval.pending_changes.get('status') not in ('Todo', 'In Progress', 'Done'):
+                raise ValidationError({'error': 'Invalid requested status.'})
+            obj.completed_at = timezone.now() if approval.pending_changes['status'] == 'Done' else None
         if approval.action == ApprovalRequest.Action.DELETE:
             obj.delete()
         else:
@@ -1419,21 +1500,30 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
         approval.status = ApprovalRequest.Status.APPROVED
         approval.reviewed_by = reviewer
         approval.reviewed_at = timezone.now()
-        approval.review_note = request.data.get('note', '')
+        approval.review_note = request.data.get('note', request.data.get('review_note', ''))
         approval.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'review_note'])
+        from .signals import notify
+        notify([approval.requested_by], 'Request reviewed', f'{approval.entity_name}: {approval.status.lower()}', action_url='/app/my-requests')
         return Response(self.get_serializer(approval).data)
 
     @action(detail=True, methods=['post'])
+    @transaction.atomic
     def reject(self, request, pk=None):
         reviewer = self._require_reviewer()
-        approval = self.get_object()
+        candidate = self.get_object()
+        if candidate.entity_type == 'task':
+            Task.objects.select_for_update().filter(pk=candidate.entity_id, company_id=candidate.company_id).first()
+        approval = self.get_queryset().select_for_update(of=('self',)).get(pk=candidate.pk)
+        self._check_task_reviewer(approval, reviewer)
         if approval.status != ApprovalRequest.Status.PENDING:
             raise ValidationError({'error': 'This request has already been reviewed.'})
         approval.status = ApprovalRequest.Status.REJECTED
         approval.reviewed_by = reviewer
         approval.reviewed_at = timezone.now()
-        approval.review_note = request.data.get('note', '')
+        approval.review_note = request.data.get('note', request.data.get('review_note', ''))
         approval.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'review_note'])
+        from .signals import notify
+        notify([approval.requested_by], 'Request reviewed', f'{approval.entity_name}: {approval.status.lower()}', action_url='/app/my-requests')
         return Response(self.get_serializer(approval).data)
 
 

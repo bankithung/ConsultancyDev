@@ -85,6 +85,15 @@ PERMISSION_RULES = {
 # the tool name the MCP server exposes, the request body and the response.
 # Keyed by (router prefix, action method name).
 ACTION_OVERLAY = {
+    ('tasks', 'reviewers'): {
+        'description': 'Active eligible reviewers for a task: its branch managers, head managers and company admins.',
+        'response': 'Array of {id, name, role}',
+    },
+    ('tasks', 'request_status'): {
+        'description': 'Request a task status change or edit the caller’s pending request. Status stays unchanged until manager approval.',
+        'body': {'status': 'Todo | In Progress | Done', 'message': 'required progress update', 'assigned_reviewer': 'required reviewer user id'},
+        'response': 'ApprovalRequest object',
+    },
     ('branches', 'set_default'): {
         'tool_name': 'set_default_branch',
         'description': 'Make an active branch the company default. Company administrators only. Replaces the previous default without moving members or records.',
