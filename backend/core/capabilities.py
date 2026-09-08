@@ -20,13 +20,10 @@ THE THREE RULES
    RolePermission docstring for why neither "empty means deny" nor "empty means
    allow" is acceptable.
 
-2. FLOORS. Some capabilities cannot be held below a floor role, and the floor is
-   applied HERE, at resolution, not only at write time. `manageUsers` is the
-   sharp example: a company admin who could grant it to EMPLOYEE would be
-   handing every employee the ability to mint a COMPANY_ADMIN account and take
-   the tenant over. Enforcing the floor on the read path means a row written
-   around the API — Django admin, a shell, a bad data migration — still cannot
-   escalate anyone.
+2. COMPANY CONTROL. Company admins may grant or revoke every company
+   capability for every company role. Only manageCompanies stays platform-only.
+   The permission editor itself uses an administrator role check so admins can
+   restore settings after disabling their own company capabilities.
 
 3. DEV_ADMIN IS NOT CONFIGURABLE. The platform operator holds everything and no
    tenant row can change that, or a customer could lock their vendor out.
@@ -114,71 +111,18 @@ DEFAULTS = {
 
 # ------------------------------------------------------------------- floors
 
-#: Capabilities that may never be held below a given role, with the reason
-#: shown to the admin on the greyed-out cell.
-#:
-#: The test is not "is this powerful?" — most capabilities are. It is "can
-#: holding this be used to acquire MORE authority than it names, or to switch
-#: off a control that exists to make someone else accountable?". Anything that
-#: can rewrite the role/branch graph, reach across tenants, or remove an audit
-#: step is floored. Everything else is left delegable, because a permissions
-#: screen where most of the grid is locked is a permissions screen the customer
-#: cannot use.
+# Platform operations are the only non-delegable capability.
 PROTECTED = {
     Capability.MANAGE_COMPANIES: (
         Role.DEV_ADMIN,
         'Creating and deleting companies is a platform-operator action and '
         'crosses tenant boundaries. It cannot be delegated inside a company.',
     ),
-    Capability.MANAGE_USERS: (
-        Role.COMPANY_ADMIN,
-        'Managing staff accounts includes choosing their role, so anyone who '
-        'holds it can create a company admin and take over the account. It '
-        'cannot be granted below company admin. Managers can still add '
-        'employees to their own branches without it.',
-    ),
-    Capability.MANAGE_SETTINGS: (
-        Role.COMPANY_ADMIN,
-        'This capability governs this screen. Granting it to a lower role '
-        'would let that role grant itself everything else on the grid.',
-    ),
-    Capability.MANAGE_BRANCHES: (
-        Role.COMPANY_ADMIN,
-        'Branch membership is what decides which records a manager can see. '
-        'Anyone who can create or re-point branches can widen their own scope '
-        'across the company.',
-    ),
-    Capability.VIEW_EARNINGS: (
-        Role.HEAD_MANAGER,
-        'Earnings cover every branch, not just the reader’s own. This is a '
-        'confidentiality floor rather than an escalation one, but company-wide '
-        'revenue is not a branch-level figure.',
-    ),
-    Capability.MANAGE_COMMISSIONS: (
-        Role.HEAD_MANAGER,
-        'Writing a commission row is a promise to pay money to an agent. '
-        'Below head manager there is nobody accountable for the payout, and '
-        'the same person could create the agent and the commission.',
-    ),
-    Capability.REVIEW_APPROVALS: (
-        Role.BRANCH_MANAGER,
-        'The approval queue exists to put a second person between an employee '
-        'and a deletion. Granting review to employees would let the requester '
-        'approve their own request, which removes the control entirely.',
-    ),
-    Capability.DELETE_RECORDS: (
-        Role.BRANCH_MANAGER,
-        'Employees raise an approval request instead of deleting. Granting '
-        'this to employees does not widen access — it switches the approval '
-        'workflow off, and with it the audit trail of who authorised a '
-        'deletion.',
-    ),
+
 }
 
-#: Capabilities a COMPANY_ADMIN may not have taken away. Without these nobody
-#: inside the tenant could administer it, and the only way back would be a
-#: database edit by the vendor.
-ADMIN_ESSENTIALS = (Capability.MANAGE_SETTINGS, Capability.MANAGE_USERS)
+# Permission-editor access is independent of capability toggles.
+ADMIN_ESSENTIALS = ()
 
 
 def floor_for(capability):
@@ -203,7 +147,7 @@ def is_delegable_to(capability, role):
 # ---------------------------------------------------------------- resolution
 
 CACHE_TTL = 300
-_CACHE_PREFIX = 'core:rolecaps:v1'
+_CACHE_PREFIX = 'core:rolecaps:v2'
 
 
 def cache_key(company_id):

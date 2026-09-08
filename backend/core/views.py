@@ -49,7 +49,7 @@ from .permissions import (
     CanManageOwnCompany, CanManageRefunds,
     CanManageSettings, CanManageUsers,
     CanViewCounselors, IsAuthenticatedAndActive,
-    IsDevAdmin, ReadOnlyOrCompanyAdmin, ReadOnlyOrManager,
+    IsDevAdmin, IsCompanyAdmin, ReadOnlyOrCompanyAdmin, ReadOnlyOrManager,
     ScopedObjectPermission, SubscriptionActive,
     branch_ids_for, can_write_object, scope_queryset,
 )
@@ -508,7 +508,7 @@ class BranchViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
-        if not user.can_manage_users:
+        if not role_has(user, Capability.MANAGE_BRANCHES):
             raise PermissionDenied('Only a company admin can create branches.')
         try:
             services.check_branch_quota(user.company)
@@ -1481,7 +1481,7 @@ class RolePermissionView(APIView):
     answer to "what does this look like before anyone configures it".
     """
 
-    permission_classes = [CanManageSettings]
+    permission_classes = [IsCompanyAdmin]
 
     # ------------------------------------------------------------- resolution
     def _target_company(self, request):
@@ -1536,17 +1536,6 @@ class RolePermissionView(APIView):
             # as `protection_reason`; repeating it in all five cells of a row
             # would print the same paragraph five times on a phone.
             reason = f'Cannot be granted below {Role(floor).label}.'
-        elif not capabilities.role_has(actor, capability):
-            can_grant = False
-            reason = 'You cannot grant a capability your own role does not hold.'
-
-        if role == Role.COMPANY_ADMIN and capability in capabilities.ADMIN_ESSENTIALS:
-            can_revoke = False
-            reason = reason or (
-                'A company admin must keep this, or nobody inside the company '
-                'could administer it — including undoing the change.'
-            )
-
         if company is None:
             can_grant = can_revoke = False
             reason = reason or 'Choose a company to configure its permissions.'

@@ -22,7 +22,7 @@ from django.db.models import Q
 from rest_framework import permissions
 
 from .capabilities import role_has
-from .models import Capability, Role
+from .models import Capability, Role, RolePermission
 
 SAFE_METHODS = permissions.SAFE_METHODS
 
@@ -266,7 +266,9 @@ class CanCreateStaff(IsAuthenticatedAndActive):
         return (
             user.is_dev_admin
             or role_has(user, Capability.MANAGE_USERS)
-            or user.role in (Role.HEAD_MANAGER, Role.BRANCH_MANAGER)
+            or (user.role in (Role.HEAD_MANAGER, Role.BRANCH_MANAGER)
+                and not RolePermission.objects.filter(company_id=user.company_id,
+                    role=user.role, capability=Capability.MANAGE_USERS, allowed=False).exists())
         )
 
 

@@ -603,97 +603,40 @@ class DelegationGuardTests(MatrixFixture):
                         'and must not be resolvable',
                     )
 
-    def test_at_or_above_the_floor_a_protected_capability_is_grantable(self):
-        """
-        The positive control. A guard that refuses every grant would satisfy the
-        test above perfectly and make the screen useless.
-        """
-        dev_admin = self.users[Role.DEV_ADMIN]
-        checked = 0
-        for capability in capabilities.PROTECTED:
-            floor = capabilities.floor_for(capability)
-            for role in CONFIGURABLE:
-                if capabilities.ROLE_RANK[role] < capabilities.ROLE_RANK[floor]:
-                    continue
-                with self.subTest(capability=str(capability), role=role):
-                    response = self.put_changes(
-                        dev_admin,
-                        [{'role': role, 'capability': str(capability), 'allowed': True}],
-                        company=self.company,
-                    )
-                    self.assertStatus(
-                        response, status.HTTP_200_OK,
-                        f'grant {capability} to {role} (floor {floor})',
-                    )
-                    self.assertTrue(
-                        capabilities.resolve(self.company.pk)[role][str(capability)],
-                    )
-                    checked += 1
-        self.assertGreater(checked, 0, 'this test asserted nothing')
-
-    def test_the_resolver_clamps_a_row_written_around_the_api(self):
-        """
-        Defence in depth. The serializer refuses the escalating change, but a
-        row inserted through the Django admin, a shell or a bad data migration
-        bypasses the serializer entirely — so the floor is applied again when
-        the matrix is read.
-        """
-        RolePermission.objects.create(
-            company=self.company, role=Role.EMPLOYEE,
-            capability=Capability.MANAGE_USERS, allowed=True,
-        )
-        self.assertFalse(
-            capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['manageUsers'],
-            'a hand-written row must not be able to escalate anyone',
-        )
-        # And the API agrees: creating a staff account is still refused.
-        response = self.role_client(Role.EMPLOYEE).post('/api/users/', {
-            'username': 'smuggled', 'password': PASSWORD, 'role': Role.COMPANY_ADMIN,
-        }, format='json')
-        self.assertStatus(response, status.HTTP_403_FORBIDDEN, 'employee create user')
-        self.assertFalse(User.objects.filter(username='smuggled').exists())
-
-    def test_nobody_can_grant_a_capability_they_do_not_hold(self):
-        """
-        A company admin who has had a capability taken away from their own role
-        must not be able to hand it to a role and take it back.
-        """
+    def test_admin_can_toggle_every_company_capability_for_every_role(self):
         admin = self.users[Role.COMPANY_ADMIN]
-        # Taken away by the platform operator, so the admin is not simply
-        # undoing their own edit.
-        self.grant(
-            Role.COMPANY_ADMIN, Capability.MANAGE_COMMISSIONS, allowed=False,
-            actor=self.users[Role.DEV_ADMIN], company=self.company,
-        )
-        self.assertFalse(capabilities.role_has(admin, Capability.MANAGE_COMMISSIONS))
+        for role in CONFIGURABLE:
+            for cap in Capability:
+                if cap == Capability.MANAGE_COMPANIES:
+                    continue
+                for allowed in (True, False, True):
+                    with self.subTest(role=role, capability=cap, allowed=allowed):
+                        response = self.put_changes(admin, [{'role': role, 'capability': cap.value, 'allowed': allowed}])
+                        self.assertStatus(response, 200, 'toggle company permission')
+                        cell = response.data['matrix'][role][cap.value]
+                        self.assertEqual(cell['allowed'], allowed)
+                        self.assertTrue(cell['editable'])
 
-        response = self.put_changes(admin, [{
-            'role': Role.HEAD_MANAGER, 'capability': 'manageCommissions',
-            'allowed': True,
-        }])
-        self.assertRefused(response, 'does not hold it')
-        self.assertFalse(
-            capabilities.resolve(self.company.pk)[Role.HEAD_MANAGER]['manageCommissions'],
-        )
+    def test_the_resolver_still_blocks_platform_permissions(self):
+        RolePermission.objects.create(company=self.company, role=Role.EMPLOYEE,
+            capability=Capability.MANAGE_COMPANIES, allowed=True)
+        self.assertFalse(capabilities.resolve(self.company.pk)[Role.EMPLOYEE]['manageCompanies'])
 
-        # Revoking something you do not hold is not escalation, and stays legal.
-        allowed_response = self.put_changes(admin, [{
-            'role': Role.HEAD_MANAGER, 'capability': 'manageRefunds',
-            'allowed': False,
-        }])
-        self.assertStatus(allowed_response, status.HTTP_200_OK, 'revoke is not a grant')
+    def test_admin_can_restore_a_revoked_capability(self):
+        admin = self.users[Role.COMPANY_ADMIN]
+        self.grant(Role.COMPANY_ADMIN, Capability.MANAGE_COMMISSIONS, allowed=False)
+        response = self.put_changes(admin, [{'role': Role.COMPANY_ADMIN,
+            'capability': 'manageCommissions', 'allowed': True}])
+        self.assertStatus(response, 200, 'restore permission')
+        self.assertTrue(capabilities.role_has(admin, Capability.MANAGE_COMMISSIONS))
 
-    def test_a_company_admin_cannot_strip_their_own_administration(self):
-        for capability in capabilities.ADMIN_ESSENTIALS:
-            with self.subTest(capability=str(capability)):
-                response = self.put_changes(self.users[Role.COMPANY_ADMIN], [{
-                    'role': Role.COMPANY_ADMIN, 'capability': str(capability),
-                    'allowed': False,
-                }])
-                self.assertRefused(response)
-                self.assertTrue(
-                    capabilities.resolve(self.company.pk)[Role.COMPANY_ADMIN][str(capability)],
-                )
+    def test_admin_can_disable_settings_and_staff_then_restore_them(self):
+        admin = self.users[Role.COMPANY_ADMIN]
+        for allowed in (False, True):
+            response = self.put_changes(admin, [{'role': Role.COMPANY_ADMIN,
+                'capability': cap, 'allowed': allowed} for cap in ('manageSettings', 'manageUsers')])
+            self.assertStatus(response, 200, 'admin retains permission controls')
+            self.assertEqual(admin.can_manage_users, allowed)
 
     def test_dev_admin_rows_are_refused_and_ignored(self):
         response = self.put_changes(self.users[Role.COMPANY_ADMIN], [{
@@ -720,7 +663,7 @@ class DelegationGuardTests(MatrixFixture):
         """
         response = self.put_changes(self.users[Role.COMPANY_ADMIN], [
             {'role': Role.HEAD_MANAGER, 'capability': 'manageCommissions', 'allowed': True},
-            {'role': Role.EMPLOYEE, 'capability': 'manageUsers', 'allowed': True},
+            {'role': Role.EMPLOYEE, 'capability': 'manageCompanies', 'allowed': True},
         ])
         self.assertRefused(response)
         self.assertEqual(RolePermission.objects.count(), 0, 'nothing may be written')
@@ -1067,27 +1010,26 @@ class ManagerHiringTests(MatrixFixture):
             'the field is absent from the manager serializer, so it is dropped',
         )
 
-    def test_granting_manage_users_to_a_manager_is_still_refused(self):
-        """
-        The whole reason the hiring right is its own permission rather than a
-        capability: `manageUsers` remains non-delegable, so the business need
-        did not become an escalation path.
-        """
-        response = self.put_changes(self.users[Role.COMPANY_ADMIN], [{
-            'role': Role.BRANCH_MANAGER, 'capability': 'manageUsers', 'allowed': True,
-        }])
-        self.assertStatus(response, status.HTTP_400_BAD_REQUEST, 'grant manageUsers')
-        self.assertFalse(
-            capabilities.resolve(self.company.pk)[Role.BRANCH_MANAGER]['manageUsers'],
-        )
-        # And the manager still cannot create a manager.
-        self.assertStatus(
-            self.hire(
-                self.users[Role.BRANCH_MANAGER], 'still_no',
-                role=Role.BRANCH_MANAGER, branch=self.kohima,
-            ),
-            status.HTTP_403_FORBIDDEN, 'manager creates a manager after the attempt',
-        )
+    def test_explicit_staff_denial_stops_manager_hiring(self):
+        self.grant(Role.BRANCH_MANAGER, Capability.MANAGE_USERS, allowed=False)
+        self.assertStatus(self.hire(self.users[Role.BRANCH_MANAGER], 'denied_hire',
+            branch=self.kohima), 403, 'explicit staff denial')
+
+    def test_branch_creation_does_not_require_staff_management(self):
+        self.grant(Role.COMPANY_ADMIN, Capability.MANAGE_USERS, allowed=False)
+        response = self.role_client(Role.COMPANY_ADMIN).post('/api/branches/',
+            {'name': 'Independent branch', 'code': 'INDEP'}, format='json')
+        self.assertStatus(response, 201, 'branch capability independent of staff')
+
+    def test_delegated_settings_cannot_edit_permission_matrix(self):
+        self.grant(Role.EMPLOYEE, Capability.MANAGE_SETTINGS)
+        self.assertStatus(self.role_client(Role.EMPLOYEE).get(MATRIX_URL), 403,
+            'permission editor reserved for company administrators')
+
+    def test_granting_staff_management_allows_manager_creation(self):
+        self.grant(Role.BRANCH_MANAGER, Capability.MANAGE_USERS)
+        self.assertStatus(self.hire(self.users[Role.BRANCH_MANAGER], 'delegated_manager',
+            role=Role.BRANCH_MANAGER, branch=self.kohima), 201, 'delegated staff management')
 
 
 # ===========================================================================

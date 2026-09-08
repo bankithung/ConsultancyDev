@@ -265,8 +265,8 @@ class CatalogBuildTests(SimpleTestCase):
         roles = self.catalog['roles']
         self.assertEqual(roles['rank']['DEV_ADMIN'], 5)
         self.assertEqual(roles['defaults']['manageCompanies'], ['DEV_ADMIN'])
-        self.assertEqual(roles['protected']['manageUsers']['floor'], 'COMPANY_ADMIN')
-        self.assertEqual(roles['admin_essentials'], ['manageSettings', 'manageUsers'])
+        self.assertEqual(set(roles['protected']), {'manageCompanies'})
+        self.assertEqual(roles['admin_essentials'], [])
         # Sorted, because MUTABLE_FIELDS holds sets: see the note in the builder.
         self.assertEqual(self.catalog['approvals']['mutable_fields']['payment'], ['method', 'reference', 'status'])
         self.assertEqual(set(self.catalog['transfers']['transferable']),
