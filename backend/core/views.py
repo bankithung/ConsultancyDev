@@ -516,6 +516,19 @@ class BranchViewSet(viewsets.ModelViewSet):
             raise ValidationError({'error': exc.messages[0]})
         serializer.save(company=user.company)
 
+    @action(detail=True, methods=['post'], url_path='set-default')
+    def set_default(self, request, pk=None):
+        branch = self.get_object()
+        with transaction.atomic():
+            Company.objects.select_for_update().get(pk=branch.company_id)
+            branch.refresh_from_db()
+            if not branch.is_active:
+                raise ValidationError({'error': 'Activate this branch before making it the default.'})
+            Branch.objects.filter(company_id=branch.company_id, is_default=True).exclude(pk=branch.pk).update(is_default=False)
+            branch.is_default = True
+            branch.save(update_fields=['is_default'])
+        return Response(self.get_serializer(branch).data)
+
     def perform_destroy(self, instance):
         if instance.is_default:
             raise ValidationError({'error': 'The default branch cannot be deleted.'})

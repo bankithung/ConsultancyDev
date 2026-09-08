@@ -31,6 +31,7 @@ Generated from `mcp_server/catalog.json`. Do not edit by hand.
 | `create_branch` | write | POST branches/ | manageBranches |
 | `update_branch` | write | PATCH branches/{id}/ | manageBranches |
 | `delete_branch` | destructive | DELETE branches/{id}/ | manageBranches |
+| `set_default_branch` | action | POST branches/{id}/set-default/ | |
 | `list_commissions` | list | GET commissions/ | viewEarnings |
 | `get_commission` | read | GET commissions/{id}/ | viewEarnings |
 | `create_commission` | write | POST commissions/ | manageCommissions |

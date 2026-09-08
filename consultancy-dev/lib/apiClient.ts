@@ -1690,6 +1690,10 @@ export const apiClient = {
   },
 
   branches: {
+    setDefault: async (id: number): Promise<Branch> => {
+      const res = await api.post<Branch>(`branches/${id}/set-default/`);
+      return res.data;
+    },
     list: (params: PageParams = {}): Promise<Paginated<Branch>> =>
       fetchPage<Branch>('branches/', params),
     get: async (id: number | string): Promise<Branch> => {
@@ -1915,6 +1919,5 @@ export const apiClient = {
     },
   },
 };
-
 
 
