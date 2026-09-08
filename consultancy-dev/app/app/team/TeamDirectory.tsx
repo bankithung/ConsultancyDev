@@ -90,7 +90,7 @@ function branchIsRequired(role: Role): boolean {
 
 /** A platform admin belongs to no company, so no branch can be picked. */
 function branchApplies(role: Role): boolean {
-  return role !== 'DEV_ADMIN' && role !== 'HEAD_MANAGER';
+  return role !== 'DEV_ADMIN';
 }
 
 /** Radix Select forbids an empty item value, so "no branch" needs a sentinel. */
@@ -1007,8 +1007,8 @@ export function TeamDirectory() {
                 </SelectContent>
               </Select>
               {fieldErrors.role && <p className="text-xs text-red-600">{fieldErrors.role}</p>}
-              {form.role === 'HEAD_MANAGER' ? <p className="text-xs text-slate-500">Oversees all company branches.</p> : branchApplies(form.role) && <>
-              <Label htmlFor="user-branch">Branch{branchIsRequired(form.role) ? ' *' : ''}</Label>
+              {branchApplies(form.role) && <>
+              <Label htmlFor="user-branch">{form.role === 'HEAD_MANAGER' ? 'Base branch' : 'Branch'}{branchIsRequired(form.role) ? ' *' : ''}</Label>
               <Select value={form.branch} disabled={saveMutation.isPending} onValueChange={(branch) => setForm({ ...form, branch })}>
                 <SelectTrigger id="user-branch"><SelectValue placeholder="Choose a branch" /></SelectTrigger>
                 <SelectContent>
@@ -1016,6 +1016,7 @@ export function TeamDirectory() {
                   {branches.filter((branch) => branch.is_active || branch.id === editing?.branch).map((branch) => <SelectItem key={branch.id} value={String(branch.id)}>{branch.name}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {form.role === 'HEAD_MANAGER' && <p className="text-xs text-slate-500">Access to all company branches.</p>}
               {branchQuery.isError && <ErrorBanner error={branchQuery.error} />}
               {fieldErrors.branch && <p className="text-xs text-red-600">{fieldErrors.branch}</p>}
               </>}

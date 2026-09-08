@@ -32,7 +32,7 @@ export function BranchMembersDialog({ branch, initialUser, initialRole, onClose 
   const [selected, setSelected] = useState<User | null>(initialUser ?? null);
   const [role, setRole] = useState<Role>(initialRole ?? initialUser?.role ?? 'EMPLOYEE');
   const [branchId, setBranchId] = useState(
-    String(initialRole === 'HEAD_MANAGER' ? 'none' : initialUser?.branch ?? branch.id),
+    String(initialUser?.branch ?? branch.id),
   );
 
   const roster = useQuery({
@@ -76,7 +76,6 @@ export function BranchMembersDialog({ branch, initialUser, initialRole, onClose 
       if (branchId !== String(selected.branch ?? 'none')) {
         patch.branch = branchId === 'none' ? null : Number(branchId);
       }
-      if (role === 'HEAD_MANAGER') patch.branch = null;
       if (selected.role === 'HEAD_MANAGER' && role !== 'HEAD_MANAGER') patch.managed_managers = [];
       return apiClient.users.update(selected.id, patch);
     },
@@ -93,7 +92,7 @@ export function BranchMembersDialog({ branch, initialUser, initialRole, onClose 
     const nextRole = initialRole ?? member.role;
     setSelected(member);
     setRole(nextRole);
-    setBranchId(nextRole === 'HEAD_MANAGER' ? 'none' : String(branch.id));
+    setBranchId(String(nextRole === 'HEAD_MANAGER' ? member.branch ?? branch.id : branch.id));
     save.reset();
   };
 
@@ -174,8 +173,7 @@ export function BranchMembersDialog({ branch, initialUser, initialRole, onClose 
                 onValueChange={(value) => {
                   const nextRole = value as Role;
                   setRole(nextRole);
-                  if (nextRole === 'HEAD_MANAGER') setBranchId('none');
-                  else if (branchId === 'none') setBranchId(String(branch.id));
+                  if (nextRole !== 'HEAD_MANAGER' && branchId === 'none') setBranchId(String(branch.id));
                 }}
               >
                 <SelectTrigger id="assignment-role"><SelectValue /></SelectTrigger>
@@ -185,11 +183,11 @@ export function BranchMembersDialog({ branch, initialUser, initialRole, onClose 
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="assignment-branch">Branch{requiresBranch ? ' *' : ''}</Label>
-              <Select value={branchId} disabled={role === 'HEAD_MANAGER'} onValueChange={setBranchId}>
+              <Label htmlFor="assignment-branch">{role === 'HEAD_MANAGER' ? 'Base branch' : 'Branch'}{requiresBranch ? ' *' : ''}</Label>
+              <Select value={branchId} disabled={save.isPending} onValueChange={setBranchId}>
                 <SelectTrigger id="assignment-branch"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {!requiresBranch && <SelectItem value="none">All branches</SelectItem>}
+                  {!requiresBranch && <SelectItem value="none">Not assigned</SelectItem>}
                   {branchChoices.map((item) => (
                     <SelectItem key={item.id} value={String(item.id)}>{item.name}{!item.is_active ? ' (inactive)' : ''}</SelectItem>
                   ))}

@@ -18,7 +18,7 @@ from django.http import FileResponse
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -172,8 +172,24 @@ class RoleTokenObtainPairSerializer(TokenObtainPairSerializer):
     load-bearing.
     """
 
+    def validate(self, attrs):
+        identifier = attrs['username'].strip()
+        # Preserve exact usernames. Email fallback must identify one account.
+        if not User.objects.filter(username=identifier).exists():
+            matches = list(User.objects.filter(email__iexact=identifier).values_list('username', flat=True)[:2])
+            if len(matches) > 1:
+                raise AuthenticationFailed('Unable to sign in with these credentials. Use your username.')
+            if matches:
+                identifier = matches[0]
+        data = super().validate({**attrs, 'username': identifier})
+        data['user'] = UserSerializer(self.user).data
+        security_log.info('Login success for %s (%s)', self.user.username, self.user.role)
+        return data
+
     @classmethod
     def get_token(cls, user):
+        if not user.is_active_employee:
+            raise PermissionDenied('Your account has been deactivated.')
         token = super().get_token(user)
         token['role'] = user.role
         token['company'] = user.company_id
@@ -186,24 +202,6 @@ class LoginView(TokenObtainPairView):
     serializer_class = RoleTokenObtainPairSerializer
     throttle_scope = 'login'
 
-    def post(self, request, *args, **kwargs):
-        response = super().post(request, *args, **kwargs)
-        if response.status_code == 200:
-            user = User.objects.select_related('company', 'branch').filter(
-                username=request.data.get('username'),
-            ).first()
-            if user and not user.is_active_employee:
-                security_log.info('Blocked login for deactivated user %s', user.username)
-                return Response(
-                    {'error': 'Your account has been deactivated.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-            if user:
-                response.data['user'] = UserSerializer(user).data
-                security_log.info('Login success for %s (%s)', user.username, user.role)
-        else:
-            security_log.info('Login failure for username=%r', request.data.get('username'))
-        return response
 
 
 class LogoutView(APIView):
