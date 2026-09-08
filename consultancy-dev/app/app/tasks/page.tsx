@@ -1190,6 +1190,7 @@ export default function TasksPage() {
             />
 
             <Drawer open={!!approvalTask} onOpenChange={(open) => { if (!open) setApprovalTask(null); }}
+                panelClassName="md:w-[50vw]"
                 title={approvalTask?.pending_approval ? 'Update approval request' : 'Request status change'}
                 description={approvalTask?.title} bodyClassName="p-5"
                 footer={<Button disabled={requestApproval.isPending || !reviewerId || !approvalMessage.trim()} onClick={() => requestApproval.mutate()}>{requestApproval.isPending ? 'Sending…' : 'Send for approval'}</Button>}>
