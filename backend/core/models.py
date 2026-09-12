@@ -14,7 +14,7 @@ Visibility hierarchy
 --------------------
     DEV_ADMIN       platform operator, sees everything
     COMPANY_ADMIN   everything inside their Company
-    HEAD_MANAGER    the branches of the managers assigned to them
+    HEAD_MANAGER    every branch of their own company
     BRANCH_MANAGER  their own Branch
     EMPLOYEE        records they own, plus records transferred to them
 
@@ -245,8 +245,8 @@ class User(AbstractUser):
         null=True, blank=True,
         help_text='Required for BRANCH_MANAGER and EMPLOYEE.',
     )
-    # A Head Manager oversees a chosen set of branch managers; the admin
-    # configures this. Their data scope is the union of those managers' branches.
+    # Legacy reporting links, retained for API compatibility. Head managers
+    # now oversee every company branch regardless of these assignments.
     managed_managers = models.ManyToManyField(
         'self', symmetrical=False, related_name='head_managers', blank=True,
         limit_choices_to={'role': Role.BRANCH_MANAGER},
@@ -300,11 +300,8 @@ class User(AbstractUser):
         for company-wide roles; callers must check the role first.
         """
         if self.is_head_manager:
-            return list(
-                Branch.objects.filter(
-                    users__in=self.managed_managers.all()
-                ).values_list('id', flat=True).distinct()
-            )
+            from .permissions import branch_ids_for
+            return sorted(branch_ids_for(self))
         if self.is_branch_manager or self.is_employee:
             return [self.branch_id] if self.branch_id else []
         return []

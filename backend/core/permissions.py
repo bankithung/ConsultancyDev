@@ -11,8 +11,7 @@ The visibility rules, stated once:
 
     DEV_ADMIN       everything, across all companies
     COMPANY_ADMIN   everything within their own company
-    HEAD_MANAGER    records in the branches of the branch-managers assigned
-                    to them, plus their own
+    HEAD_MANAGER    records in every branch of their own company
     BRANCH_MANAGER  records in their own branch
     EMPLOYEE        records they own, plus records transferred to them
 
@@ -33,16 +32,15 @@ SAFE_METHODS = permissions.SAFE_METHODS
 def branch_ids_for(user):
     """Branch ids a manager-level user may reach."""
     if user.is_head_manager:
-        # Union of the branches of every manager assigned to this head manager,
-        # plus their own branch if they have one.
+        # Company leadership includes new branches and branches without a manager.
+        # Always scope by company; legacy reporting links cannot cross tenants.
         from .models import Branch
-        ids = set(
-            Branch.objects.filter(users__in=user.managed_managers.all())
+        if not user.company_id:
+            return set()
+        return set(
+            Branch.objects.filter(company_id=user.company_id)
             .values_list('id', flat=True)
         )
-        if user.branch_id:
-            ids.add(user.branch_id)
-        return ids
     if user.is_branch_manager or user.is_employee:
         return {user.branch_id} if user.branch_id else set()
     return set()
@@ -284,7 +282,7 @@ class CanManageCommissions(CanViewFinancials):
     """
     Reading the commission ledger and WRITING to it are different rights.
 
-    A head manager runs a branch P&L, so `viewEarnings` deliberately lets them
+    A head manager oversees company branches, so `viewEarnings` deliberately lets them
     read it. Creating or amending a row is a promise to pay money to an agent,
     which is `manageCommissions` — a separate capability with its own row on
     the permissions grid, so an admin can hand out one without the other.

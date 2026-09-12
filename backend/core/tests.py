@@ -100,7 +100,8 @@ class BaseAPITestCase(TestCase):
         cls.emp_d1 = mk('emp_d1', Role.EMPLOYEE, cls.company, cls.dimapur)
         cls.rival_admin = mk('rival_admin', Role.COMPANY_ADMIN, cls.rival, cls.rival_branch)
 
-        cls.head.managed_managers.set([cls.mgr_k])  # oversees Kohima only
+        # Kept to prove the legacy reporting links no longer limit company scope.
+        cls.head.managed_managers.set([cls.mgr_k])
 
         def enquiry(owner, branch, name):
             return Enquiry.objects.create(
@@ -342,15 +343,15 @@ class RoleScopingTests(BaseAPITestCase):
             self.names(client.get('/api/enquiries/')), {'kohima-one', 'kohima-two'},
         )
 
-    def test_head_manager_sees_the_branches_of_managers_they_oversee(self):
-        """Oversees Kohima's manager only, so Dimapur stays hidden."""
+    def test_head_manager_sees_every_company_branch(self):
         client = self.auth(self.head)
-        names = self.names(client.get('/api/enquiries/'))
-        self.assertIn('kohima-one', names)
-        self.assertNotIn('dimapur-one', names)
+        self.assertEqual(
+            self.names(client.get('/api/enquiries/')),
+            {'kohima-one', 'kohima-two', 'dimapur-one'},
+        )
 
-    def test_head_manager_scope_expands_with_assignment(self):
-        self.head.managed_managers.add(self.mgr_d)
+    def test_legacy_manager_links_do_not_limit_head_manager_scope(self):
+        self.head.managed_managers.clear()
         client = self.auth(self.head)
         self.assertIn('dimapur-one', self.names(client.get('/api/enquiries/')))
 
@@ -2384,9 +2385,9 @@ class ScopedCacheTests(BaseAPITestCase):
         """
         The signature carries company, branch, role and active status, so
         re-parenting or demoting an account invalidates its entries at once
-        rather than after the TTL. (Changes NOT on the row -- a head manager's
-        assigned managers, an accepted transfer -- lag by up to the TTL; that
-        is documented in core/caching.py and is bounded to the user's own view.)
+        rather than after the TTL. Accepted transfers are not on the row and
+        may lag by up to the TTL; that is documented in core/caching.py and is
+        bounded to the user's own view.
         """
         before = scope_signature(self.mgr_k)
 

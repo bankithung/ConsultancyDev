@@ -11,8 +11,8 @@ key is built in exactly one place, `scoped_cache_key`, and it is built from
 the caller.
 
 WHAT MAKES THE KEY SAFE. `scope_signature` includes `user.pk`. Every input
-`scope_queryset` consults — company, branch, role, the transfer table, the
-head manager's assigned managers — is reachable only from that one user row, so
+`scope_queryset` consults — company, branch, role and the transfer table — is
+reachable only from that one user row, so
 two different users can never collide on a key. That is a structural
 guarantee, not a careful-enumeration one.
 
@@ -23,8 +23,7 @@ affect the SAME user's own view. Two things lag by up to
   * a write (a new payment, a new enquiry) does not move that user's dashboard
     counters until the entry expires;
   * a change to that user's own scope that is not visible on their user row —
-    reassigning which managers a head manager oversees, or accepting a record
-    transfer — takes effect on the next miss rather than instantly. Changes
+    accepting a record transfer — takes effect on the next miss rather than instantly. Changes
     that ARE on the row (company, branch, role, deactivation) are in the
     signature and take effect immediately.
 

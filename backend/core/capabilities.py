@@ -88,7 +88,7 @@ DEFAULTS = {
     Capability.VIEW_ANALYTICS: _MANAGERS_UP,
     # commissions/ READS — CanViewFinancials. WIDER than CAN.viewEarnings in
     # rbac/roles.ts, which lists admins only: a head manager runs a branch P&L
-    # and the server has always let them read it.
+    # and the server has always let them read company results.
     Capability.VIEW_EARNINGS: _ADMINS + (Role.HEAD_MANAGER,),
     # commissions/ WRITES and the whole of agents/ — CanManageCommissions.
     Capability.MANAGE_COMMISSIONS: _ADMINS,

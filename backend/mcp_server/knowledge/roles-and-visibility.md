@@ -6,7 +6,7 @@
 |---|---|---|
 | DEV_ADMIN | 5 | Everything across all companies. Has no company; records it creates land with company NULL and are invisible to tenants. |
 | COMPANY_ADMIN | 4 | Everything in its own company. |
-| HEAD_MANAGER | 3 | The union of the branches of the branch managers assigned to it (`managed_managers`), plus its own branch. |
+| HEAD_MANAGER | 3 | Every branch in its own company, including new branches. |
 | BRANCH_MANAGER | 2 | Its own branch. |
 | EMPLOYEE | 1 | Records it **owns** (`owner` field) plus records transferred to it and accepted. Never `created_by`. |
 
@@ -66,7 +66,8 @@ For `users` and `signup-requests` the real rule differs per action, which is why
 
 - Company admins create any role except DEV_ADMIN (only a dev admin can mint one) and set
   `branch` and `managed_managers`.
-- Head and branch managers may create only EMPLOYEE accounts, and only in branches they run.
+- Head and branch managers may create only EMPLOYEE accounts. Head managers may use any company
+  branch; branch managers are limited to their own branch.
   Anything else is 403, decided inside the viewset rather than by the permission class.
 - Users edit only their own profile unless they hold manageUsers. Password changes go through
   `change_password`.

@@ -721,7 +721,7 @@ def _roles():
         'visibility': {
             'DEV_ADMIN': 'everything, all companies',
             'COMPANY_ADMIN': 'everything in own company',
-            'HEAD_MANAGER': 'records in the branches of the branch managers assigned to them (managed_managers), plus own branch',
+            'HEAD_MANAGER': 'records in all branches of their own company, including new branches and branches without a manager',
             'BRANCH_MANAGER': 'records in own branch',
             'EMPLOYEE': 'records they OWN (owner field), plus records transferred to them and accepted',
         },

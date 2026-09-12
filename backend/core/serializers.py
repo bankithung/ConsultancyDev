@@ -255,7 +255,7 @@ class UserAdminSerializer(UserSerializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         request = self.context.get('request')
-        # A head manager may only be assigned branch managers from their own company.
+        # Legacy reporting links remain tenant-bound.
         if request and request.user.is_authenticated and request.user.company_id:
             # `managed_managers` is absent on the manager-facing subclass below,
             # so this is guarded rather than indexed blind.
@@ -345,8 +345,7 @@ class UserManagerCreateSerializer(UserAdminSerializer):
 
     Two things are missing from `UserAdminSerializer` on purpose:
 
-      * `managed_managers` — a manager must not be able to configure a head
-        manager's span of control, which is what decides who sees which branch.
+      * `managed_managers` — a legacy reporting field reserved for admins.
       * any authority over `role` or `branch` beyond what the view allows. Those
         stay writable here (a manager has to be able to say which of their
         branches the hire belongs to) and the VIEW is what constrains the

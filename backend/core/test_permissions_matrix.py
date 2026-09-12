@@ -109,9 +109,8 @@ class MatrixFixture(TestCase):
             ),
             Role.EMPLOYEE: cls._mk('employee', Role.EMPLOYEE, cls.company, cls.kohima),
         }
-        # The head manager's span of control is Kohima, so the Kohima fixtures
-        # are inside their write scope and a 403 there is the permission rule
-        # talking rather than the queryset hiding the row.
+        # Legacy reporting links remain populated for compatibility but do not
+        # limit a head manager's company-wide branch scope.
         cls.users[Role.HEAD_MANAGER].managed_managers.set(
             [cls.users[Role.BRANCH_MANAGER]]
         )
@@ -931,16 +930,15 @@ class ManagerHiringTests(MatrixFixture):
         self.assertEqual(hire.company_id, self.company.pk)
         self.assertTrue(hire.has_usable_password())
 
-    def test_a_head_manager_can_hire_into_a_branch_they_oversee(self):
-        """
-        A head manager's scope is the union of their branch managers' branches,
-        so Kohima is inside it and Dimapur is not.
-        """
-        response = self.hire(
-            self.users[Role.HEAD_MANAGER], 'span_hire', branch=self.kohima,
-        )
-        self.assertStatus(response, status.HTTP_201_CREATED, 'head manager hires')
-        self.assertEqual(User.objects.get(username='span_hire').branch_id, self.kohima.pk)
+    def test_a_head_manager_can_hire_into_any_company_branch(self):
+        for branch in (self.kohima, self.dimapur):
+            username = f'head_hire_{branch.code.lower()}'
+            with self.subTest(branch=branch.code):
+                response = self.hire(
+                    self.users[Role.HEAD_MANAGER], username, branch=branch,
+                )
+                self.assertStatus(response, status.HTTP_201_CREATED, 'head manager hires')
+                self.assertEqual(User.objects.get(username=username).branch_id, branch.pk)
 
     def test_an_admin_can_still_create_any_role(self):
         """The positive control for the rule the managers' one sits beside."""
@@ -987,18 +985,16 @@ class ManagerHiringTests(MatrixFixture):
         self.assertStatus(response, status.HTTP_403_FORBIDDEN, 'manager creates dev admin')
         self.assertFalse(User.objects.filter(username='sneaky_dev').exists())
 
-    def test_a_manager_cannot_hire_into_a_branch_they_do_not_run(self):
-        for actor_role in (Role.BRANCH_MANAGER, Role.HEAD_MANAGER):
-            username = f'{actor_role.lower()}_reaches_dimapur'
-            with self.subTest(actor=actor_role):
-                response = self.hire(
-                    self.users[actor_role], username, branch=self.dimapur,
-                )
-                self.assertStatus(
-                    response, status.HTTP_403_FORBIDDEN,
-                    f'{actor_role} hiring into Dimapur',
-                )
-                self.assertFalse(User.objects.filter(username=username).exists())
+    def test_a_branch_manager_cannot_hire_into_another_branch(self):
+        username = 'branch_manager_reaches_dimapur'
+        response = self.hire(
+            self.users[Role.BRANCH_MANAGER], username, branch=self.dimapur,
+        )
+        self.assertStatus(
+            response, status.HTTP_403_FORBIDDEN,
+            'branch manager hiring into Dimapur',
+        )
+        self.assertFalse(User.objects.filter(username=username).exists())
 
     def test_an_employee_still_cannot_create_anyone(self):
         response = self.hire(
@@ -1049,11 +1045,10 @@ class ManagerHiringTests(MatrixFixture):
         self.assertTrue(target.is_active_employee)
         self.assertTrue(User.objects.filter(pk=target.pk).exists())
 
-    def test_a_manager_cannot_configure_a_head_managers_span_of_control(self):
+    def test_a_manager_cannot_write_legacy_reporting_links(self):
         """
-        `managed_managers` decides which branches a head manager can see. A
-        manager who could set it could widen their own supervisor's scope — or,
-        with a self-referential set, their own.
+        `managed_managers` is retained for API compatibility. Managers still
+        cannot write this admin-only reporting field.
         """
         response = self.client_for(self.users[Role.BRANCH_MANAGER]).post(
             '/api/users/', {
