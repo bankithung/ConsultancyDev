@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, Menu, User } from 'lucide-react';
+import { Bell, Building2, Menu, User } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { Menu as HeadlessMenu, Transition } from '@headlessui/react';
 import { Fragment, useMemo } from 'react';
@@ -47,7 +47,6 @@ const PAGE_TITLES: Record<string, string> = {
 
 // Route to page subtitle mapping
 const PAGE_SUBTITLES: Record<string, string> = {
-  '/app/dashboard': "Here's your overview",
   '/app/students': 'View and manage all students across every stage',
   '/app/my-students': 'Manage enquiries and registrations assigned to you',
   '/app/follow-ups': 'Manage and track your communications',
@@ -75,6 +74,12 @@ interface TopbarProps {
 export function Topbar({ onMenuClick }: TopbarProps) {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
+  const isDashboard = pathname === '/app/dashboard';
+  const dashboardBranch = user && (
+    ['DEV_ADMIN', 'COMPANY_ADMIN', 'HEAD_MANAGER'].includes(user.role)
+      ? 'All branches'
+      : user.branch_name?.trim() || 'Branch not assigned'
+  );
 
   // Calculate page title based on current path
   const { pageTitle: dynamicPageTitle } = useUIStore();
@@ -171,14 +176,15 @@ export function Topbar({ onMenuClick }: TopbarProps) {
   return (
     <>
       <header className="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-4 sticky top-0 z-50 shadow-sm transition-all duration-200">
-        <div className="flex items-center flex-1">
+        <div className="flex min-w-0 items-center flex-1">
           <button onClick={onMenuClick} className="md:hidden p-2 rounded-md hover:bg-gray-100 mr-2 text-gray-600 transition-colors">
             <Menu size={20} />
           </button>
 
-          <div className="hidden md:flex flex-col">
+          <div className={`${isDashboard ? 'flex' : 'hidden md:flex'} min-w-0 flex-col`}>
             <span className="text-lg font-bold text-gray-800 font-heading tracking-tight leading-tight">{pageTitle}</span>
             <div className="flex items-center gap-3">
+              {isDashboard && dashboardBranch && <span data-testid="dashboard-branch" title={dashboardBranch} className="flex min-w-0 items-center gap-1 text-xs font-medium leading-tight text-teal-700"><Building2 size={12} className="shrink-0" /><span className="truncate">{dashboardBranch}</span></span>}
               {pageSubtitle && <span className="text-xs text-gray-500 leading-tight">{pageSubtitle}</span>}
               {/* Task Stats for Tasks Page */}
               {taskStats && (
@@ -193,7 +199,7 @@ export function Topbar({ onMenuClick }: TopbarProps) {
           </div>
         </div>
 
-        <div className="flex items-center space-x-4">
+        <div className="ml-3 flex shrink-0 items-center space-x-4">
           {/* Notifications */}
           <HeadlessMenu as="div" className="relative">
             <HeadlessMenu.Button
