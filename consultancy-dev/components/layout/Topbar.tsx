@@ -60,7 +60,7 @@ const PAGE_SUBTITLES: Record<string, string> = {
   '/app/payments': 'Manage financial transactions and history',
   '/app/appointments': 'Schedule and manage appointments',
   '/app/universities': 'Browse and manage university partnerships',
-  '/app/team': 'Members, profiles and branch assignments',
+  '/app/team': 'Manage people and branches',
   '/app/settings': 'Manage your company profile and preferences',
   '/app/profile': 'View and edit your profile',
   '/app/notifications': 'Stay updated with important events',
