@@ -1,9 +1,41 @@
-{% extends 'core/oauth/base.html' %}{% block content %}
-{% if error %}<h1>Could not connect</h1><p>{{ error.description }}</p><a href="/app/mcp">Back to connection settings</a>
-{% else %}<h1>Connect {{ application.name }}?</h1>
-<div class="account"><strong>{{ request.user.username }}</strong><br>{{ request.user.company.name }} · {{ request.user.get_role_display }}</div>
-<p>This connection can:</p><ul>{% for scope in scopes_descriptions %}<li>{{ scope }}</li>{% endfor %}</ul>
-<p>Your existing company and role permissions apply. The assistant may make changes you request, including creating, editing, or deleting records you can manage.</p>
-<form method="post">{% csrf_token %}{% for field in form %}{% if field.is_hidden %}{{ field }}{% endif %}{% endfor %}{{ form.errors }}{{ form.non_field_errors }}
-<div class="actions"><button type="submit" name="allow" value="Authorize">Allow connection</button><button type="submit" class="secondary">Cancel</button></div></form>
-<p class="small">You can disconnect this assistant from your <a href="/oauth/connections/">connected accounts</a> at any time.</p>{% endif %}{% endblock %}
+{% extends 'core/oauth/base.html' %}
+{% load static %}
+{% block title %}Connect {{ application.name|default:'assistant' }} · Consultancy Dev{% endblock %}
+{% block content %}
+{% if error %}
+  <h1>Could not connect</h1>
+  <p>{{ error.description }}</p>
+  <div class="actions"><a class="button secondary" href="/app/mcp">Back to connections</a></div>
+{% else %}
+  {% if application.client_id == 'consultancy-chatgpt' %}<img class="app-logo" src="{% static 'core/oauth/chatgpt.png' %}" alt="ChatGPT logo" width="56" height="56">{% endif %}
+  <h1>Connect {{ application.name }}?</h1>
+  <p>Link your CRM account to {{ application.name }}.</p>
+  <div class="account">
+    <span class="avatar" aria-hidden="true">{{ request.user.username|first|upper }}</span>
+    <div class="account-copy">
+      <strong>{{ request.user.email|default:request.user.username }}</strong>
+      <p>{{ request.user.company.name }} · {{ request.user.get_role_display }}</p>
+    </div>
+  </div>
+  <h2 class="eyebrow">Access requested</h2>
+  <ul class="permissions">
+    {% for scope in scopes_descriptions %}
+      {% if scope == 'Read and update CRM records within your existing account permissions' %}
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>View CRM records</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Create, edit and delete records</span></li>
+      {% else %}<li>{{ scope }}</li>{% endif %}
+    {% endfor %}
+  </ul>
+  <p class="scope-note">Limited to your company and role permissions.</p>
+  <form method="post">
+    {% csrf_token %}
+    {% for field in form %}{% if field.is_hidden %}{{ field }}{% endif %}{% endfor %}
+    {{ form.errors }}
+    <div class="actions consent-actions">
+      <button type="submit" class="secondary">Cancel</button>
+      <button type="submit" name="allow" value="Authorize">Allow connection</button>
+    </div>
+  </form>
+  <p class="footnote">Disconnect anytime in <a href="/oauth/connections/">Connected accounts</a>.</p>
+{% endif %}
+{% endblock %}

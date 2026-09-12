@@ -31,6 +31,7 @@ export default function NewEnquiryPage() {
       <EnquiryForm 
         onSubmit={(data) => mutation.mutate(data)} 
         isLoading={mutation.isPending} 
+        submitError={mutation.error}
       />
     </div>
   );

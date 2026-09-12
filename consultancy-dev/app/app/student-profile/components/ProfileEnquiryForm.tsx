@@ -49,7 +49,7 @@ const enquirySchema = z.object({
   motherName: z.string().min(1, "Mother's name is required"),
   permanentAddress: z.string().min(1, 'Address is required'),
   schoolName: z.string().min(1, 'School name is required'),
-  stream: z.enum(['Science', 'Commerce', 'Arts']),
+  stream: z.string().trim().min(1, 'Stream is required').max(50, 'Stream must be 50 characters or fewer'),
   courseInterested: z.string().min(1, 'Course is required'),
   gapYear: z.boolean(),
   collegeDropout: z.boolean(),
@@ -398,7 +398,7 @@ export function ProfileEnquiryForm({ initialData, onSubmit, isLoading }: Profile
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {CLASS_12_STREAMS.map((stream) => (
+                          {[...new Set([...CLASS_12_STREAMS, initialData.stream].filter(Boolean))].map((stream) => (
                             <SelectItem key={stream} value={stream}>
                               {stream}
                             </SelectItem>
@@ -407,6 +407,7 @@ export function ProfileEnquiryForm({ initialData, onSubmit, isLoading }: Profile
                       </Select>
                     )}
                   />
+                  {errors.stream && <p className="text-xs text-red-600">{errors.stream.message}</p>}
                 </div>
 
                 <div className="space-y-1.5">

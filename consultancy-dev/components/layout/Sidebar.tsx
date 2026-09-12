@@ -26,7 +26,6 @@ import {
   LogOut,
   Building2,
   ArrowLeftRight,
-  GitBranch,
   ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
@@ -161,11 +160,10 @@ const NAV_SECTIONS: NavSection[] = [
   {
     heading: 'Management',
     items: [
-      { label: 'Branches', href: '/app/branches', icon: GitBranch, roles: ADMINS },
       // One roster. `Users` (accounts) and `Counselors` (the same payload as
       // cards) were two doors onto it; the write controls inside are gated on
       // `manageUsers`, so a head manager reads it and changes nothing.
-      { label: 'Team', href: '/app/team', icon: Users, roles: [...ADMINS, ROLES.HEAD_MANAGER] },
+      { label: 'Team & Branches', href: '/app/team', icon: Users, roles: [...ADMINS, ROLES.HEAD_MANAGER, ROLES.BRANCH_MANAGER] },
       // Beside Users on purpose: that screen says who exists and which role
       // they hold, this one says what a role can do. FLAT rather than a child
       // of Settings — `isActiveHref` treats a path as owning everything nested

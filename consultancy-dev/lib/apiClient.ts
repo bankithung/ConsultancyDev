@@ -703,7 +703,6 @@ const toEnquiryPayload = (data: EnquiryInput): Record<string, unknown> => {
     mother_mobile: data.motherMobile,
     other_location: data.otherLocation,
     gender: data.gender,
-    date_of_birth: data.dob,
     caste: data.caste,
     religion: data.religion,
     family_place: data.familyPlace,
@@ -738,6 +737,8 @@ const toEnquiryPayload = (data: EnquiryInput): Record<string, unknown> => {
     payload[key] = value;
   }
 
+  // An untouched DOB is omitted; explicitly clearing it must persist as null.
+  if (data.dob !== undefined) payload.date_of_birth = data.dob || null;
   return payload;
 };
 
@@ -1914,7 +1915,6 @@ export const apiClient = {
     },
   },
 };
-
 
 
 

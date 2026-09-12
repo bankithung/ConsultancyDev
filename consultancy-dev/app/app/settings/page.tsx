@@ -319,12 +319,7 @@ function SettingsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="min-w-0">
-        <h1 className="font-heading text-2xl font-bold text-slate-900">Settings</h1>
-        <p className="mt-1 font-body text-sm text-slate-600">
-          Your company profile, branches and plan
-        </p>
-      </div>
+      <h1 className="sr-only">Settings</h1>
 
       {subscription && !subscription.is_usable && (
         <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">

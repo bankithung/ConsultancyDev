@@ -9,11 +9,12 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { INDIAN_STATES, SCHOOL_BOARDS, COURSES, CLASS_12_STREAMS, CASTES, RELIGIONS } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Enquiry } from '@/lib/types';
 import { User, GraduationCap, Users, BookOpen, Phone, Mail, MapPin, Check, Settings, ArrowLeft, Wand2 } from 'lucide-react';
 import { generateRandomEnquiry } from '@/app/utils/generateRandomEnquiry';
 import { useEffect, useMemo, useCallback } from 'react';
+import { ErrorBanner } from '@/components/common/states';
+import { toast } from '@/store/toastStore';
 
 /**
  * READ BEFORE ADDING A FIELD.
@@ -87,7 +88,7 @@ const optionalNumber = z.preprocess(
 const enquirySchema = z.object({
   date: z.string().min(1, "Date is required"),
   schoolName: z.string().min(1, "School Name is required"),
-  stream: z.enum(['Science', 'Commerce', 'Arts']),
+  stream: z.string().trim().min(1, 'Stream is required').max(50, 'Stream must be 50 characters or fewer'),
   candidateName: z.string().min(1, "Candidate Name is required"),
   courseInterested: z.string().min(1, "Course is required"),
   mobile: z.string().min(10, "Valid mobile number is required"),
@@ -147,6 +148,7 @@ interface EnquiryFormProps {
   initialData?: Enquiry;
   onSubmit: (data: EnquiryFormValues) => void;
   isLoading: boolean;
+  submitError?: unknown;
 }
 
 /** Coerced numeric fields arrive as `unknown`; render only real numbers. */
@@ -224,7 +226,7 @@ function FormNavigation({ sectionProgress, scrollToSection }: { sectionProgress:
   );
 }
 
-export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormProps) {
+export function EnquiryForm({ initialData, onSubmit, isLoading, submitError }: EnquiryFormProps) {
   const {
     register,
     control,
@@ -232,7 +234,7 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
     watch,
     setValue,
     reset,
-    formState: { errors },
+    formState: { errors, submitCount },
   } = useForm<EnquiryFormInput, unknown, EnquiryFormValues>({
     resolver: zodResolver(enquirySchema),
     defaultValues: initialData ? {
@@ -254,6 +256,7 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
 
   const formValues = watch();
   const selectedStream = watch('stream');
+  const streamOptions = [...new Set([...CLASS_12_STREAMS, ...(initialData?.stream ? [initialData.stream] : [])])];
   const physicsMarks = watch('physicsMarks');
   const chemistryMarks = watch('chemistryMarks');
   const biologyMarks = watch('biologyMarks');
@@ -327,7 +330,7 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
       <FormNavigation sectionProgress={sectionProgress} scrollToSection={scrollToSection} />
 
       {/* Main Form - Centered with max width */}
-      <form onSubmit={handleSubmit((data) => onSubmit(data))} className="max-w-3xl mx-auto space-y-8 pb-12 relative">
+      <form onInvalidCapture={(event) => toast.error('Check the highlighted field', (event.target as HTMLInputElement).validationMessage)} onSubmit={handleSubmit((data) => onSubmit(data))} className="max-w-3xl mx-auto space-y-8 pb-32 md:pb-12 relative">
         <div className="xl:hidden flex justify-end mb-4">
            <Button 
             type="button" 
@@ -422,7 +425,7 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
             {/* DOB */}
             <div className="md:col-span-4 space-y-2">
               <Label htmlFor="dob" className="text-slate-700 font-semibold">Date of Birth</Label>
-              <Input type="date" {...register('dob')} className={STANDARD_INPUT_STYLE} />
+              <Input id="dob" type="date" {...register('dob')} className={STANDARD_INPUT_STYLE} />
             </div>
 
 
@@ -487,7 +490,7 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
               {/* Father */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 uppercase tracking-wide">Father's Info</h4>
+                <h4 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 uppercase tracking-wide">Father’s Info</h4>
                 <div className="space-y-3">
                   <div>
                     <Label className="text-xs text-slate-500 font-medium">Name <span className="text-red-500">*</span></Label>
@@ -507,7 +510,7 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
 
               {/* Mother */}
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 uppercase tracking-wide">Mother's Info</h4>
+                <h4 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2 uppercase tracking-wide">Mother’s Info</h4>
                 <div className="space-y-3">
                   <div>
                     <Label className="text-xs text-slate-500 font-medium">Name <span className="text-red-500">*</span></Label>
@@ -746,13 +749,14 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
                         control={control}
                         render={({ field }) => (
                           <Select onValueChange={field.onChange} value={field.value}>
-                            <SelectTrigger className={BLUE_INPUT_STYLE}><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectTrigger ref={field.ref} onBlur={field.onBlur} aria-invalid={!!errors.stream} aria-describedby={errors.stream ? 'stream-error' : undefined} className={BLUE_INPUT_STYLE}><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
-                              {CLASS_12_STREAMS.map(stream => <SelectItem key={stream} value={stream}>{stream}</SelectItem>)}
+                              {streamOptions.map(stream => <SelectItem key={stream} value={stream}>{stream}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         )}
                       />
+                      {errors.stream && <p id="stream-error" className="text-xs text-red-600">{errors.stream.message}</p>}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -792,7 +796,7 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
             </div>
 
             {/* Science Marks Scorecard */}
-            {selectedStream === 'Science' && (
+            {['science', 'pcb', 'pcm', 'pcmb'].includes(selectedStream?.toLowerCase()) && (
               <div className="bg-gradient-to-b from-slate-50 to-white rounded-xl border border-slate-200 overflow-hidden mt-2">
                 <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                   <h4 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Science Scorecard</h4>
@@ -811,30 +815,30 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
                     <div className="col-span-2 md:col-span-4 grid grid-cols-4 gap-2">
                       <div className="space-y-1">
                         <Label className="text-[10px] text-slate-500 uppercase">Physics</Label>
-                        <Input type="number" {...register('physicsMarks')} className="h-9 text-sm bg-white border-slate-300 focus:border-teal-500 focus:ring-teal-500 rounded-md" placeholder="Mk" />
+                        <Input type="number" step="0.01" {...register('physicsMarks')} className="h-9 text-sm bg-white border-slate-300 focus:border-teal-500 focus:ring-teal-500 rounded-md" placeholder="Mk" />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] text-slate-500 uppercase">Chem</Label>
-                        <Input type="number" {...register('chemistryMarks')} className="h-9 text-sm bg-white border-slate-300 focus:border-teal-500 focus:ring-teal-500 rounded-md" placeholder="Mk" />
+                        <Input type="number" step="0.01" {...register('chemistryMarks')} className="h-9 text-sm bg-white border-slate-300 focus:border-teal-500 focus:ring-teal-500 rounded-md" placeholder="Mk" />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] text-slate-500 uppercase">Bio</Label>
-                        <Input type="number" {...register('biologyMarks')} className="h-9 text-sm bg-white border-slate-300 focus:border-teal-500 focus:ring-teal-500 rounded-md" placeholder="Mk" />
+                        <Input type="number" step="0.01" {...register('biologyMarks')} className="h-9 text-sm bg-white border-slate-300 focus:border-teal-500 focus:ring-teal-500 rounded-md" placeholder="Mk" />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] text-slate-500 uppercase">Maths</Label>
-                        <Input type="number" {...register('mathsMarks')} className="h-9 text-sm bg-white border-slate-300 focus:border-teal-500 focus:ring-teal-500 rounded-md" placeholder="Mk" />
+                        <Input type="number" step="0.01" {...register('mathsMarks')} className="h-9 text-sm bg-white border-slate-300 focus:border-teal-500 focus:ring-teal-500 rounded-md" placeholder="Mk" />
                       </div>
                     </div>
                   </div>
                   <div className="flex gap-6 pt-4 border-t border-slate-100">
                     <div className="flex-1 space-y-2">
                       <Label className="text-xs font-semibold text-slate-700">Previous NEET Score</Label>
-                      <Input type="number" {...register('previousNeetMarks')} className={STANDARD_INPUT_STYLE} placeholder="Score" />
+                      <Input type="number" step="0.01" {...register('previousNeetMarks')} className={STANDARD_INPUT_STYLE} placeholder="Score" />
                     </div>
                     <div className="flex-1 space-y-2">
                       <Label className="text-xs font-semibold text-slate-700">Present NEET Score</Label>
-                      <Input type="number" {...register('presentNeetMarks')} className={STANDARD_INPUT_STYLE} placeholder="Score" />
+                      <Input type="number" step="0.01" {...register('presentNeetMarks')} className={STANDARD_INPUT_STYLE} placeholder="Score" />
                     </div>
                   </div>
                 </div>
@@ -904,7 +908,7 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
                 <Label className="text-slate-700 font-semibold">Budget / Payment Limit</Label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold">₹</span>
-                  <Input type="number" {...register('paymentAmount')} placeholder="0.00" className={STANDARD_INPUT_STYLE + " pl-8"} />
+                  <Input type="number" step="0.01" {...register('paymentAmount')} placeholder="0.00" className={STANDARD_INPUT_STYLE + " pl-8"} />
                 </div>
               </div>
             </div>
@@ -913,6 +917,13 @@ export function EnquiryForm({ initialData, onSubmit, isLoading }: EnquiryFormPro
 
         {/* Floating Action Bar / Mobile Action */}
         <div className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t border-slate-200 p-4 md:relative md:bg-transparent md:border-0 md:p-0 z-20">
+          {submitCount > 0 && Object.keys(errors).length > 0 && (
+            <div role="alert" className="mx-auto mb-3 max-h-28 max-w-5xl overflow-y-auto rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="font-semibold">Couldn’t save. Check these fields:</p>
+              <ul className="mt-1 list-disc pl-4">{Object.entries(errors).map(([field, error]) => <li key={field}>{error?.message ? String(error.message) : `Check ${field}`}</li>)}</ul>
+            </div>
+          )}
+          {!!submitError && <div role="alert" className="mx-auto mb-3 max-w-5xl"><ErrorBanner error={submitError} /></div>}
           <div className="max-w-5xl mx-auto flex justify-end gap-4">
             <Button
               type="button"

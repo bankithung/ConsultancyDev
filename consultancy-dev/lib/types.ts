@@ -427,7 +427,8 @@ export interface Enquiry extends ScopedFields {
   id: string;
   date: string; // ISO date
   schoolName: string;
-  stream: 'Science' | 'Commerce' | 'Arts';
+  /** The API accepts free text, including subject combinations such as PCB. */
+  stream: string;
   candidateName: string;
   courseInterested: string;
   mobile: string;

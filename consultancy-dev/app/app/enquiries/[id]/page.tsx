@@ -2,7 +2,7 @@
 
 import { useRouter, useParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '@/lib/apiClient';
+import { apiClient, type EnquiryInput } from '@/lib/apiClient';
 import { createApprovalRequest } from '@/components/common/approvals';
 import { EnquiryForm } from '../components/EnquiryForm';
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,7 @@ export default function EnquiryDetailsPage() {
 
   // Mutation for creating approval request (employees)
   const approvalMutation = useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: EnquiryInput) => {
       if (!enquiry) return;
       await createApprovalRequest({
         action: 'UPDATE',
@@ -33,7 +33,7 @@ export default function EnquiryDetailsPage() {
         entity_id: Number(id),
         entity_name: enquiry.candidateName,
         message: 'Request to update enquiry details',
-        pending_changes: data,
+        pending_changes: { ...data },
       });
     },
     onSuccess: () => {
@@ -48,10 +48,12 @@ export default function EnquiryDetailsPage() {
 
   // Mutation for direct update (admins)
   const updateMutation = useMutation({
-    mutationFn: async (data: any) => {
-      await apiClient.enquiries.update(id, data);
+    mutationFn: async (data: EnquiryInput) => {
+      return apiClient.enquiries.update(id, data);
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      queryClient.setQueryData(['enquiry', id], saved);
+      queryClient.invalidateQueries({ queryKey: ['student-profile'] });
       queryClient.invalidateQueries({ queryKey: ['enquiries'] });
       toast.success('Enquiry updated successfully');
       router.push('/app/enquiries');
@@ -62,7 +64,7 @@ export default function EnquiryDetailsPage() {
     },
   });
 
-  const handleSubmit = (data: any) => {
+  const handleSubmit = (data: EnquiryInput) => {
     // Check user role and route appropriately
     if (user?.role === 'EMPLOYEE') {
       approvalMutation.mutate(data);
@@ -98,6 +100,7 @@ export default function EnquiryDetailsPage() {
         initialData={enquiry}
         onSubmit={handleSubmit}
         isLoading={updateMutation.isPending || approvalMutation.isPending}
+        submitError={updateMutation.error || approvalMutation.error}
       />
     </div>
   );
