@@ -7,6 +7,7 @@ import { AlertTriangle, Building2, ChevronRight, Pencil, Plus, Power, Search, Sh
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ErrorBanner, ErrorState, LoadingState } from '@/components/common/states';
 import { ROLE_LABELS } from '@/components/rbac/roles';
@@ -72,7 +73,16 @@ export function BranchDirectory() {
         </div>
         <div className="flex flex-col gap-2 px-4 pb-3 xl:flex-row">
           <div className="relative min-w-0 flex-1"><Search size={14} className="absolute left-3 top-2.5 text-slate-400" /><Input className="h-9 bg-white pl-8 text-xs" aria-label="Search branches" placeholder="Search branches…" value={search} onChange={(event) => { setSearch(event.target.value); setMemberSearch(''); }} /></div>
-          <select aria-label="Sort branches" className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600" value={ordering} onChange={(event) => setOrdering(event.target.value)}><option value="name">Name A–Z</option><option value="staff">Most staff</option><option value="recent">Newest</option></select>
+          <Select value={ordering} onValueChange={setOrdering}>
+            <SelectTrigger aria-label="Sort branches" className="h-9 bg-white text-xs text-slate-600 xl:w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Name A–Z</SelectItem>
+              <SelectItem value="staff">Most staff</SelectItem>
+              <SelectItem value="recent">Newest</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         {branches.isError ? <div className="p-4"><ErrorState error={branches.error} onRetry={() => branches.refetch()} /></div> : branches.isLoading ? <div className="p-4"><LoadingState rows={3} label="Loading branches" /></div> : (
           <ul className="max-h-72 space-y-1 overflow-y-auto px-2 pb-3 lg:max-h-[640px]">

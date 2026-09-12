@@ -9,14 +9,13 @@ import { ErrorBanner, LoadingState } from '@/components/common/states';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ROLE_LABELS, assignableRoles } from '@/components/rbac/roles';
 import { useCurrentRole } from '@/components/rbac/useCurrentRole';
 import { loadAllPages } from '@/app/app/student-profile/aggregate';
 import { apiClient } from '@/lib/apiClient';
 import { toast } from '@/store/toastStore';
 import type { Branch, Role, User, UserAdminInput } from '@/lib/types';
-
-const selectClass = 'h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50';
 
 interface BranchMembersDialogProps {
   branch: Branch;
@@ -131,8 +130,39 @@ export function BranchMembersDialog({
           {branches.isError && <ErrorBanner error={branches.error} />}
           <fieldset disabled={!canManage || save.isPending} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2"><Label htmlFor="assignment-role">Role</Label><select id="assignment-role" className={selectClass} value={role} onChange={(event) => { const nextRole = event.target.value as Role; setRole(nextRole); if (nextRole === 'HEAD_MANAGER') setBranchId('none'); else if (branchId === 'none') setBranchId(String(branch.id)); }}>{roleChoices.map((value) => <option key={value} value={value}>{ROLE_LABELS[value]}</option>)}</select></div>
-              <div className="space-y-2"><Label htmlFor="assignment-branch">Branch{requiresBranch ? ' *' : ''}</Label><select id="assignment-branch" className={selectClass} value={branchId} disabled={role === 'HEAD_MANAGER'} onChange={(event) => setBranchId(event.target.value)}>{!requiresBranch && <option value="none">All branches</option>}{branchChoices.map((item) => <option key={item.id} value={String(item.id)}>{item.name}{!item.is_active ? ' (inactive)' : ''}</option>)}</select></div>
+              <div className="space-y-2">
+                <Label htmlFor="assignment-role">Role</Label>
+                <Select
+                  value={role}
+                  onValueChange={(value) => {
+                    const nextRole = value as Role;
+                    setRole(nextRole);
+                    if (nextRole === 'HEAD_MANAGER') setBranchId('none');
+                    else if (branchId === 'none') setBranchId(String(branch.id));
+                  }}
+                >
+                  <SelectTrigger id="assignment-role"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {roleChoices.map((value) => (
+                      <SelectItem key={value} value={value}>{ROLE_LABELS[value]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="assignment-branch">Branch{requiresBranch ? ' *' : ''}</Label>
+                <Select value={branchId} disabled={role === 'HEAD_MANAGER'} onValueChange={setBranchId}>
+                  <SelectTrigger id="assignment-branch"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {!requiresBranch && <SelectItem value="none">All branches</SelectItem>}
+                    {branchChoices.map((item) => (
+                      <SelectItem key={item.id} value={String(item.id)}>
+                        {item.name}{!item.is_active ? ' (inactive)' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             {role === 'BRANCH_MANAGER' && <p className="text-xs text-slate-500">In charge of members and records in this branch.</p>}
             {role === 'EMPLOYEE' && <p className="text-xs text-slate-500">Reports to this branch’s manager{companyMembers.filter((member) => member.branch === Number(branchId) && member.role === 'BRANCH_MANAGER' && member.id !== selected.id).length === 1 ? '' : 's'}.</p>}
