@@ -1071,6 +1071,10 @@ class ApprovalRequest(models.Model):
     requested_by = models.ForeignKey(
         django_settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='approval_requests',
     )
+    assigned_reviewer = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='assigned_approvals',
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
     review_note = models.TextField(blank=True, default='')
     reviewed_by = models.ForeignKey(

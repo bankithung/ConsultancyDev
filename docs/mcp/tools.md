@@ -123,6 +123,8 @@ Generated from `mcp_server/catalog.json`. Do not edit by hand.
 | `update_task` | write | PATCH tasks/{id}/ |  |
 | `delete_task` | destructive | DELETE tasks/{id}/ | deleteRecords |
 | `reorder_tasks` | action | POST tasks/reorder/ | |
+| `request_status_task` | action | POST tasks/{id}/request-status/ | |
+| `reviewers_task` | action | GET tasks/{id}/reviewers/ | |
 | `list_templates` | list | GET templates/ |  |
 | `get_template` | read | GET templates/{id}/ |  |
 | `create_template` | write | POST templates/ |  |

@@ -727,16 +727,40 @@ class DocumentSerializer(ScopedSerializer):
 class TaskSerializer(ScopedSerializer):
     assigned_to_name = serializers.SerializerMethodField()
 
+    pending_approval = serializers.SerializerMethodField()
+
+    def get_pending_approval(self, obj):
+        item = ApprovalRequest.objects.filter(entity_type='task', entity_id=obj.pk,
+            company_id=obj.company_id, action='UPDATE', status='PENDING').first()
+        return ApprovalRequestSerializer(item).data if item else None
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        user = self.context['request'].user
+        current = self.instance.status if self.instance else 'Todo'
+        if attrs.get('status', current) not in ('Todo', 'In Progress', 'Done'):
+            raise serializers.ValidationError({'status': 'Choose Todo, In Progress or Done.'})
+        if user.is_employee:
+            if attrs.get('status', current) != current or attrs.get('completed_at'):
+                raise serializers.ValidationError({'status': 'Request approval to change task status.'})
+        return attrs
+
     class Meta:
         model = Task
         fields = (
             'id', 'title', 'description', 'assigned_to', 'assigned_to_name',
-            'due_date', 'priority', 'status', 'completed_at', 'position',
+            'due_date', 'priority', 'status', 'completed_at', 'position', 'pending_approval',
             'company', 'company_name', 'branch', 'branch_name',
             'created_by', 'created_by_name', 'owner', 'owner_name',
             'created_at', 'updated_at',
         )
         read_only_fields = SCOPE_READ_ONLY
+
+    def update(self, instance, validated_data):
+        if 'status' in validated_data and validated_data['status'] != instance.status:
+            from django.utils import timezone
+            validated_data['completed_at'] = timezone.now() if validated_data['status'] == 'Done' else None
+        return super().update(instance, validated_data)
 
     def get_assigned_to_name(self, obj):
         return obj.assigned_to.get_full_name() or obj.assigned_to.username if obj.assigned_to else 'â€”'
@@ -1072,7 +1096,7 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
             'id', 'action', 'entity_type', 'entity_id', 'entity_name', 'message',
             'pending_changes', 'status', 'review_note', 'requested_by',
             'requested_by_name', 'reviewed_by', 'reviewed_by_name',
-            'created_at', 'reviewed_at',
+            'created_at', 'reviewed_at', 'assigned_reviewer',
         )
         read_only_fields = (
             'status', 'requested_by', 'reviewed_by', 'created_at', 'reviewed_at',
@@ -1102,6 +1126,8 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
         entity_type = attrs.get('entity_type')
         entity_id = attrs.get('entity_id')
 
+        if entity_type == 'task' and attrs.get('action') == 'UPDATE':
+            raise serializers.ValidationError({'error': 'Use the task status approval form.'})
         model = ENTITY_MODELS.get(entity_type)
         if model is None:
             raise serializers.ValidationError(

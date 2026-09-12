@@ -11,7 +11,7 @@ import {
     SlidersHorizontal, X,
 } from 'lucide-react';
 
-import { api } from '@/lib/api';
+import { getApiErrorMessage, api } from '@/lib/api';
 import { apiClient, fetchCount, fetchPage } from '@/lib/apiClient';
 import type { Branch, FollowUp, Paginated, ScopedFields, User as StaffUser } from '@/lib/types';
 import { toArray } from '@/components/common/pagination';
@@ -59,6 +59,7 @@ interface TaskRow extends ScopedFields {
     priority: string;
     status: string;
     completed_at: string | null;
+    pending_approval?: { id: number; message: string; requested_by: number; assigned_reviewer: number | null; pending_changes: { status: ColumnType } } | null;
 }
 
 /** Writable fields on `tasks/`. Scope fields are stamped server-side. */
@@ -420,6 +421,30 @@ export default function TasksPage() {
     const router = useRouter();
     const queryClient = useQueryClient();
 
+    const isEmployee = user?.role === 'EMPLOYEE';
+    const [approvalTask, setApprovalTask] = useState<TaskRow | null>(null);
+    const [approvalStatus, setApprovalStatus] = useState<ColumnType>('In Progress');
+    const [approvalMessage, setApprovalMessage] = useState('');
+    const [reviewerId, setReviewerId] = useState('');
+    const reviewers = useQuery({
+        queryKey: ['task-reviewers', approvalTask?.id],
+        enabled: !!approvalTask,
+        queryFn: async () => (await api.get<Array<{id:number;name:string;role:string}>>(`tasks/${approvalTask!.id}/reviewers/`)).data,
+    });
+    const requestApproval = useMutation({
+        mutationFn: () => api.post(`tasks/${approvalTask!.id}/request-status/`, {
+            status: approvalStatus, message: approvalMessage, assigned_reviewer: Number(reviewerId),
+        }),
+        onSuccess: () => { invalidateBoard(); setApprovalTask(null); toast.success('Approval request saved'); },
+        onError: (error) => toast.error('Could not request approval', getApiErrorMessage(error)),
+    });
+    const openApproval = (task: TaskRow, status: ColumnType) => {
+        setApprovalTask(task);
+        setApprovalStatus(status);
+        setApprovalMessage(task.pending_approval?.message ?? '');
+        setReviewerId(String(task.pending_approval?.assigned_reviewer ?? ''));
+    };
+
     const canSeeOthers = is(...SUPERVISOR_ROLES);
 
     const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -726,6 +751,7 @@ export default function TasksPage() {
 
     const handleMove = (task: TaskRow, status: ColumnType) => {
         if (task.status === status) return;
+        if (isEmployee) { openApproval(task, status); return; }
         moveTask.mutate({ id: task.id, status });
     };
 
@@ -747,7 +773,7 @@ export default function TasksPage() {
             assigned_to: Number(draft.assigned_to),
             due_date: draft.due_date,
             priority: draft.priority,
-            status: draft.status,
+            status: isEmployee ? 'Todo' : draft.status,
         });
     };
 
@@ -780,7 +806,7 @@ export default function TasksPage() {
     };
 
     const openCreateFor = (column: ColumnType) => {
-        const seeded = { ...EMPTY_DRAFT, status: column, assigned_to: user ? String(user.id) : '' };
+        const seeded = { ...EMPTY_DRAFT, status: isEmployee ? 'Todo' as ColumnType : column, assigned_to: user ? String(user.id) : '' };
         setDraft(seeded);
         setDraftBaseline(seeded);
         setConfirmDiscardCreate(false);
@@ -1076,8 +1102,9 @@ export default function TasksPage() {
                                     </div>
                                 ) : (
                                     columnTasks.map((task) => (
+                                        <div key={task.id}>
+                                        {task.pending_approval && <button className="mb-1 text-xs font-medium text-amber-700" onClick={() => openApproval(task, task.pending_approval!.pending_changes.status)}>Awaiting approval · {task.pending_approval.pending_changes.status}{task.pending_approval.requested_by === user?.id ? ' · Edit request' : ''}</button>}
                                         <TaskCard
-                                            key={task.id}
                                             task={task}
                                             isDragging={draggedTask?.id === task.id}
                                             canDelete={can('deleteRecords')}
@@ -1087,6 +1114,7 @@ export default function TasksPage() {
                                             onDelete={setDeleteTarget}
                                             onEdit={openEditFor}
                                         />
+                                        </div>
                                     ))
                                 )}
                             </BoardColumn>
@@ -1160,6 +1188,23 @@ export default function TasksPage() {
                 onActiveParamChange={setActiveParam}
                 noun="task"
             />
+
+            <Drawer open={!!approvalTask} onOpenChange={(open) => { if (!open) setApprovalTask(null); }}
+                title={approvalTask?.pending_approval ? 'Update approval request' : 'Request status change'}
+                description={approvalTask?.title} bodyClassName="p-5"
+                footer={<Button disabled={requestApproval.isPending || !reviewerId || !approvalMessage.trim()} onClick={() => requestApproval.mutate()}>{requestApproval.isPending ? 'Sending…' : 'Send for approval'}</Button>}>
+                <div className="space-y-4">
+                    <p className="text-sm text-slate-500">The task moves after approval.</p>
+                    <Label>Status</Label>
+                    <Select value={approvalStatus} onValueChange={(value) => setApprovalStatus(value as ColumnType)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{COLUMNS.filter(c=>c!==approvalTask?.status).map(c=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
+                    <Label htmlFor="task-progress">Progress update *</Label>
+                    <Textarea id="task-progress" value={approvalMessage} onChange={e=>setApprovalMessage(e.target.value)} placeholder="What have you worked on or completed?" />
+                    <Label>Send to *</Label>
+                    <Select value={reviewerId} onValueChange={setReviewerId}><SelectTrigger><SelectValue placeholder="Choose a reviewer" /></SelectTrigger><SelectContent>{reviewers.data?.map(r=><SelectItem key={r.id} value={String(r.id)}>{r.name} · {r.role.replaceAll('_',' ').toLowerCase()}</SelectItem>)}</SelectContent></Select>
+                    {reviewers.isError && <p className="text-sm text-red-600">Could not load reviewers. Close and try again.</p>}
+                    {reviewers.isSuccess && !reviewers.data.length && <p className="text-sm text-amber-700">No active reviewer available. Contact your company admin.</p>}
+                </div>
+            </Drawer>
 
             {/* Create task */}
             <Drawer
@@ -1240,7 +1285,7 @@ export default function TasksPage() {
 
                         <div className="space-y-1">
                             <Label className="text-xs font-medium text-slate-600">Status</Label>
-                            <Select value={draft.status} onValueChange={(value) => setDraft({ ...draft, status: value as ColumnType })}>
+                            <Select disabled={isEmployee} value={draft.status} onValueChange={(value) => setDraft({ ...draft, status: value as ColumnType })}>
                                 <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     {COLUMNS.map((column) => (
@@ -1348,6 +1393,7 @@ export default function TasksPage() {
                                     <div className="space-y-1">
                                         <Label className="text-xs font-medium text-slate-600">Status</Label>
                                         <Select
+                                            disabled={isEmployee}
                                             value={editingTask.status}
                                             onValueChange={(value) => setEditingTask({ ...editingTask, status: value })}
                                         >

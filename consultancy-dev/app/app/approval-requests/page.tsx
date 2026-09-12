@@ -184,7 +184,9 @@ export default function ApprovalRequestsPage() {
                                             <span className="font-medium text-slate-900">{selectedRequest.entity_type}</span>
                                         </div>
                                         <p className="text-sm text-slate-700 font-medium">{selectedRequest.entity_name}</p>
-                                        <p className="text-xs text-slate-500 mt-2">Reason: {selectedRequest.message}</p>
+                                        {selectedRequest.entity_type === 'task' && selectedRequest.pending_changes?.status != null && <p className="mt-2 text-sm font-medium text-teal-700">Requested status: {String(selectedRequest.pending_changes.status)}</p>}
+                                        {selectedRequest.entity_type === 'task' && !!selectedRequest.pending_changes?._task_description && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{String(selectedRequest.pending_changes._task_description)}</p>}
+                                        <p className="text-xs text-slate-500 mt-2">Update: {selectedRequest.message}</p>
                                     </div>
 
                                     <div>
