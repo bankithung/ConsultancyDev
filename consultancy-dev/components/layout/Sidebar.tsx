@@ -108,7 +108,7 @@ const NAV_SECTIONS: NavSection[] = [
       // now three tabs on one screen — so three nav items pointed at what is
       // really one destination.
       { label: 'Admissions', href: '/app/admissions', icon: GraduationCap, roles: EVERYONE },
-      { label: 'Transfers', href: '/app/transfers', icon: ArrowLeftRight, roles: EVERYONE },
+      { label: 'Handover', href: '/app/transfers', icon: ArrowLeftRight, roles: EVERYONE },
       // Follow-ups and appointments are both scheduled contact with the same
       // prospective student, a call and a meeting, so they are two tabs on one
       // screen rather than two destinations. FLAT, unlike Documents: the page's

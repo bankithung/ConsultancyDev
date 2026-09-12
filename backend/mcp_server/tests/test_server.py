@@ -1,4 +1,5 @@
 import os
+from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault('DJANGO_ALLOW_ASYNC_UNSAFE', 'true')
 
@@ -192,10 +193,20 @@ class HttpAppTests(QuietLogsMixin, SimpleTestCase):
         SDK answers 421 for the TestClient's host — but never 401.
         """
         app = create_http_app(Settings(transport='streamable-http'))
-        with TestClient(app) as client:
+        with patch('httpx.AsyncClient.get', new_callable=AsyncMock) as verify, TestClient(app) as client:
+            verify.return_value.status_code = 200
             response = client.post('/mcp', json={'jsonrpc': '2.0', 'id': 1, 'method': 'initialize'},
                                    headers={'Authorization': 'Bearer cdk_x'})
             self.assertNotEqual(response.status_code, 401)
+
+    def test_revoked_bearer_returns_oauth_challenge(self):
+        app = create_http_app(Settings(transport='streamable-http'))
+        with patch('httpx.AsyncClient.get', new_callable=AsyncMock) as verify, TestClient(app) as client:
+            verify.return_value.status_code = 401
+            response = client.post('/mcp', json={}, headers={'Authorization': 'Bearer cdo_revoked'})
+            self.assertEqual(response.status_code, 401)
+            self.assertIn('resource_metadata=', response.headers['www-authenticate'])
+            self.assertIn('/.well-known/oauth-protected-resource/mcp', response.headers['www-authenticate'])
 
 
 class ServerSmokeTests(McpTestCase):
@@ -339,6 +350,8 @@ class TransportSecurityTests(QuietLogsMixin, SimpleTestCase):
 
     def _client(self, **settings):
         """One TestClient per app: the SDK's session manager runs once per instance."""
+        verify = self.enterContext(patch('httpx.AsyncClient.get', new_callable=AsyncMock))
+        verify.return_value.status_code = 200
         client = TestClient(create_http_app(Settings(transport='streamable-http', **settings)))
         self.enterContext(client)
         return client

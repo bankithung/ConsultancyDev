@@ -31,6 +31,8 @@ const PAGE_TITLES: Record<string, string> = {
   '/app/enrollments/new': 'New Enrollment',
   '/app/documents': 'Documents',
   '/app/payments': 'Payments',
+  '/app/transfers': 'Handover',
+  '/app/mcp': 'AI connections',
   '/app/appointments': 'Appointments',
   '/app/universities': 'University Database',
   '/app/team': 'Team',

@@ -97,9 +97,8 @@ not open in the console.
 
 ## Deliberately not implemented
 
-- **OAuth 2.1 / dynamic client registration.** Some hosted connectors (Claude.ai, ChatGPT) will
-  therefore only work if they allow a static `Authorization` header. Use a local stdio client
-  otherwise.
+- **Dynamic client registration.** OAuth authorization code with S256 PKCE is supported
+  using pre-registered clients and exact HTTPS callbacks. See [OAuth setup](chatgpt-oauth.md).
 - **Rate limiting inside the MCP process.** The backend's throttles are the limit; a 429 is
   retried once, honouring `Retry-After`, and then surfaces to the caller.
 - **Any tool that mints credentials.** See above: keys come from a password session only.

@@ -80,8 +80,9 @@ function mcpConfigSnippet(key: string, apiUrl: string): string {
   }, null, 2);
 }
 
-export function ApiKeysCard() {
+export function ApiKeysCard({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient();
+  const [showHistory, setShowHistory] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [name, setName] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
@@ -155,15 +156,17 @@ export function ApiKeysCard() {
     }
   };
 
-  const rows = keys.data?.results ?? [];
+  const allRows = keys.data?.results ?? [];
+  const historyCount = allRows.filter((key) => keyStatus(key) !== 'Active').length;
+  const rows = showHistory ? allRows : allRows.filter((key) => keyStatus(key) === 'Active');
 
   return (
     <>
-      <Card className="border-slate-200">
-        <CardContent className="p-4">
+      <Card className={embedded ? 'rounded-none border-0 shadow-none' : 'border-slate-200'}>
+        <CardContent className={embedded ? 'p-4 sm:px-5' : 'p-4'}>
           <div className="mb-1 flex items-center justify-between gap-2">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <Bot size={14} className="text-slate-400" /> AI access keys
+              <Bot size={14} className="text-slate-400" /> Access keys
             </h3>
             <Button
               size="sm"
@@ -180,8 +183,7 @@ export function ApiKeysCard() {
             </Button>
           </div>
           <p className="mb-3 text-xs text-slate-500">
-            Let an AI assistant (Claude, ChatGPT, Cursor…) work in the CRM as you through the MCP server. A
-            key has exactly your permissions. Revoke it the moment you stop using it.
+            {embedded ? 'For clients that use API keys. ChatGPT connects through OAuth above.' : 'Personal keys for AI assistants and scripts.'}
           </p>
 
           {keys.isError && (
@@ -198,7 +200,7 @@ export function ApiKeysCard() {
 
           {!keys.isLoading && !keys.isError && rows.length === 0 && (
             <p className="rounded-md border border-dashed border-slate-200 p-3 text-center text-xs text-slate-500">
-              No keys yet.
+              No active keys.
             </p>
           )}
 
@@ -214,9 +216,8 @@ export function ApiKeysCard() {
                         {key.name} <span className="font-mono text-xs text-slate-400">{key.prefix}…</span>
                       </p>
                       <p className="text-[11px] text-slate-500">
-                        Created {formatDate(key.created_at)} · Last used {formatDate(key.last_used_at)}
-                        {key.expires_at ? ` · Expires ${formatDate(key.expires_at)}` : ''}
-                        {key.revoked_at ? ` · Revoked ${formatDate(key.revoked_at)}` : ''}
+                        {key.revoked_at ? `Revoked ${formatDate(key.revoked_at)}` : `Last used ${formatDate(key.last_used_at)}`}
+                        {key.expires_at && !key.revoked_at ? ` · Expires ${formatDate(key.expires_at)}` : ''}
                       </p>
                     </div>
                     <Badge className={STATUS_CLASS[status]}>{status}</Badge>
@@ -236,6 +237,7 @@ export function ApiKeysCard() {
               })}
             </ul>
           )}
+          {historyCount > 0 && <button type="button" className="mt-3 text-[11px] font-medium text-slate-500 hover:text-teal-700" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide inactive keys' : `Show inactive keys (${historyCount})`}</button>}
         </CardContent>
       </Card>
 

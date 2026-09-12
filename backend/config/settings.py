@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     'django_filters',
     'corsheaders',
     'core',
+    'oauth2_provider',
 ]
 
 MIDDLEWARE = [
@@ -216,6 +217,7 @@ REST_FRAMEWORK = {
         # API keys first: they only claim `cdk_...` tokens and return None for
         # everything else, so JWT bearer tokens fall through unchanged.
         'core.authentication.ApiKeyAuthentication',
+        'core.oauth.McpOAuthAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     # Deny by default. Public endpoints opt out explicitly via get_permissions().
@@ -637,4 +639,34 @@ LOGGING = {
         'core': {'handlers': ['console'], 'level': LOG_LEVEL, 'propagate': False},
         'core.security': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
     },
+}
+
+
+# OAuth is scoped to the hosted MCP resource; browser JWTs and API keys remain separate.
+MCP_OAUTH_ORIGIN = os.getenv('MCP_OAUTH_ORIGIN', 'https://console.nexxteducation.in').rstrip('/')
+OAUTH2_PROVIDER = {
+    'SCOPES': {'crm': 'Read and update CRM records within your existing account permissions'},
+    'DEFAULT_SCOPES': ['crm'],
+    'OAUTH2_VALIDATOR_CLASS': 'core.oauth.McpOAuthValidator',
+    'ACCESS_TOKEN_GENERATOR': 'core.oauth.access_token_generator',
+    'RESOURCE_SERVER_TOKEN_RESOURCE_VALIDATOR': 'core.oauth.resource_matches',
+    'ACCESS_TOKEN_EXPIRE_SECONDS': 3600,
+    'AUTHORIZATION_CODE_EXPIRE_SECONDS': 120,
+    'REFRESH_TOKEN_EXPIRE_SECONDS': 30 * 24 * 3600,
+    'ROTATE_REFRESH_TOKEN': True,
+    'REFRESH_TOKEN_REUSE_PROTECTION': True,
+    'PKCE_REQUIRED': True,
+    'ALLOWED_REDIRECT_URI_SCHEMES': ['https'],
+    'COMPLIANT_BCP_RFC9700_PKCE_METHOD': True,
+    'COMPLIANT_BCP_RFC9700_IMPLICIT_GRANT': True,
+    'COMPLIANT_BCP_RFC9700_PASSWORD_GRANT': True,
+    'COMPLIANT_BCP_RFC9700_TOKEN_STORAGE': True,
+    'COMPLIANT_BCP_RFC9700_ACCESS_TOKEN_TRANSPORT': True,
+    'OIDC_ENABLED': False,
+    'OIDC_ISS_ENDPOINT': MCP_OAUTH_ORIGIN,
+    'OAUTH2_RESPONSE_TYPES_SUPPORTED': ['code'],
+    'OAUTH2_TOKEN_ENDPOINT_AUTH_METHODS_SUPPORTED': ['none'],
+    'OAUTH2_PROTECTED_RESOURCE_IDENTIFIER': MCP_OAUTH_ORIGIN + '/mcp',
+    'OAUTH2_PROTECTED_RESOURCE_AUTHORIZATION_SERVERS': [MCP_OAUTH_ORIGIN],
+    'OAUTH2_PROTECTED_RESOURCE_NAME': 'Consultancy Dev',
 }

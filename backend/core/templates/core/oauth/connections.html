@@ -1,0 +1,2 @@
+{% extends 'core/oauth/base.html' %}{% block content %}<h1>Connected accounts</h1><p>AI assistants connected as {{ request.user.username }}.</p>
+{% for connection in connections %}<form method="post">{% csrf_token %}<input type="hidden" name="application_id" value="{{ connection.application_id }}"><div class="actions"><strong>{{ connection.application__name }}</strong><button type="submit" class="secondary">Disconnect</button></div></form>{% empty %}<p>No connected accounts.</p>{% endfor %}<p><a href="/app/mcp">Back to Connect AI / MCP</a></p>{% endblock %}
