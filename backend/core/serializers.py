@@ -494,27 +494,6 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
                 f'{Role(floor).label}. {capabilities.protection_reason(capability)}'
             )
 
-        # Escalation guard 2: you cannot hand out what you do not hold. Without
-        # this an admin whose own role had a capability revoked could grant it
-        # to a role they belong to and take it straight back.
-        if allowed and not capabilities.role_has(actor, capability):
-            return (
-                f'You cannot grant {capability.label} because your own role '
-                'does not hold it.'
-            )
-
-        # Lockout guard: the tenant must retain someone who can administer it.
-        if (
-            allowed is False
-            and role == Role.COMPANY_ADMIN
-            and capability in capabilities.ADMIN_ESSENTIALS
-        ):
-            return (
-                f'{capability.label} cannot be taken away from a company '
-                'admin — nobody inside the company could administer it '
-                'afterwards, including undoing this change.'
-            )
-
         if company is None:
             return 'Choose a company before changing its permissions.'
 

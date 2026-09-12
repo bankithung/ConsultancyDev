@@ -292,7 +292,8 @@ class User(AbstractUser):
 
     @property
     def can_manage_users(self):
-        return self.is_dev_admin or self.is_company_admin
+        from .capabilities import role_has
+        return role_has(self, Capability.MANAGE_USERS)
 
     def visible_branch_ids(self):
         """
