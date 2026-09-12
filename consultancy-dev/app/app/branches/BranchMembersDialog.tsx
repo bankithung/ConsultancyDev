@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Search, Users } from 'lucide-react';
-import { Modal } from '@/components/common/Modal';
+import { Drawer } from '@/components/common/Drawer';
 import { ErrorBanner, LoadingState } from '@/components/common/states';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -66,6 +66,11 @@ export function BranchMembersDialog({
   const requiresBranch = role === 'EMPLOYEE' || role === 'BRANCH_MANAGER';
   const selectedBranch = branchChoices.find((item) => String(item.id) === branchId);
   const invalidBranch = (requiresBranch && branchId === 'none') || (branchId !== 'none' && (!selectedBranch || (!selectedBranch.is_active && selected?.branch !== selectedBranch.id)));
+  const drawerTitle = initialUser
+    ? 'Manage member'
+    : initialRole === 'HEAD_MANAGER'
+      ? 'Assign head manager'
+      : 'Assign member';
 
   const save = useMutation({
     mutationFn: async () => {
@@ -99,7 +104,17 @@ export function BranchMembersDialog({
   };
 
   return (
-    <Modal open onClose={() => !save.isPending && onClose()} size="lg" title={branch.name} description="Members, roles and reporting lines" footer={
+    <Drawer
+      open
+      onOpenChange={(next) => {
+        if (!next && !save.isPending) onClose();
+      }}
+      onRequestClose={() => !save.isPending}
+      title={drawerTitle}
+      description={`${branch.name} · Roles and branch`}
+      panelClassName="sm:w-[520px] lg:w-[560px]"
+      bodyClassName="px-4 py-5 sm:px-6"
+      footer={
       <div className="flex justify-end gap-2">
         <Button variant="outline" onClick={onClose} disabled={save.isPending}>Close</Button>
         {selected && canManage && <Button type="submit" form="branch-member-form" className="bg-teal-600 hover:bg-teal-700" disabled={!changed || invalidBranch || save.isPending || branches.isError || branches.isLoading}>{save.isPending ? 'Saving…' : 'Save assignment'}</Button>}
@@ -137,6 +152,6 @@ export function BranchMembersDialog({
           <p className="text-xs text-slate-500">Add accounts in <Link href="/app/team?tab=members" className="text-teal-700 underline">Team</Link>. Assign roles here.</p>
         </div>
       )}
-    </Modal>
+    </Drawer>
   );
 }
