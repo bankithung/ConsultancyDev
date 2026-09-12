@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-07T07:07:16.707815+00:00",
+  "generated_at": "2026-09-08T01:13:01.778243+00:00",
   "resources": [
     {
       "prefix": "agents",
@@ -1361,7 +1361,22 @@
         "city"
       ],
       "ordering_fields": [],
-      "actions": [],
+      "actions": [
+        {
+          "name": "set_default",
+          "tool_name": "set_default_branch",
+          "method": "POST",
+          "detail": true,
+          "path": "branches/{id}/set-default/",
+          "description": "Make an active branch the company default. Company administrators only. Replaces the previous default without moving members or records.",
+          "body": {},
+          "query": {},
+          "response": "Branch object",
+          "skip_generated": false,
+          "destructive": false,
+          "idempotent": true
+        }
+      ],
       "notes": [
         "The default branch cannot be deleted; a branch with users cannot be deleted."
       ]

@@ -67,6 +67,13 @@ export function BranchDirectory() {
     },
   });
   const openBranchForm = (branch: Branch | null) => setBranchForm({ branch, key: Date.now() });
+  const setDefault = useMutation({
+    mutationFn: (branch: Branch) => apiClient.branches.setDefault(branch.id),
+    onSuccess: async (branch) => {
+      setSelectedId(branch.id);
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['branches'] }), queryClient.invalidateQueries({ queryKey: ['branch-options'] })]);
+    },
+  });
 
   return (
     <div className="grid min-w-0 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]" data-testid="branch-workspace">
@@ -118,7 +125,8 @@ export function BranchDirectory() {
         {selected ? <>
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
             <div className="min-w-0"><h2 className="break-words text-sm font-semibold text-slate-900">{selected.name}</h2><p className="mt-0.5 text-xs text-slate-500">{currentMembers.length} {currentMembers.length === 1 ? 'member' : 'members'}</p></div>
-            <div className="flex items-center gap-1">
+            <div className="flex flex-wrap items-center gap-1">
+              {selected.is_default ? <Badge className="bg-teal-50 text-teal-700">Default branch</Badge> : canManageBranches && selected.is_active && <Button size="sm" variant="outline" className="h-8 text-xs" disabled={setDefault.isPending} onClick={() => setDefault.mutate(selected)}>{setDefault.isPending ? 'Saving…' : 'Set as default'}</Button>}
               {canManageMembers && <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setAssignment({ branch: selected })}><Plus size={14} className="mr-1" /> Assign member</Button>}
               {canManageBranches && <><Button size="sm" variant="ghost" className="h-8 w-8 p-0" aria-label={`Edit ${selected.name}`} onClick={() => openBranchForm(selected)}><Pencil size={14} /></Button><Button size="sm" variant="ghost" className="h-8 w-8 p-0" disabled={selected.is_default} aria-label={`${selected.is_active ? 'Deactivate' : 'Activate'} ${selected.name}`} title={selected.is_default ? 'Default branch stays active' : undefined} onClick={() => setToggleTarget(selected)}><Power size={14} /></Button></>}
             </div>
@@ -148,6 +156,7 @@ export function BranchDirectory() {
       {assignment && <BranchMembersDialog branch={assignment.branch} initialUser={assignment.user} initialRole={assignment.role} onClose={() => setAssignment(null)} />}
       <ConfirmDialog open={!!toggleTarget} onClose={() => setToggleTarget(null)} onConfirm={() => toggleTarget && toggle.mutate(toggleTarget)} title={toggleTarget?.is_active ? 'Deactivate branch?' : 'Activate branch?'} description={toggleTarget?.is_active ? 'Existing members and records are kept.' : 'Allow new records and assignments.'} confirmText={toggleTarget?.is_active ? 'Deactivate' : 'Activate'} confirmVariant={toggleTarget?.is_active ? 'destructive' : 'default'} isLoading={toggle.isPending} />
       {toggle.isError && <div className="p-4 lg:col-span-2"><ErrorBanner error={toggle.error} onDismiss={() => toggle.reset()} /></div>}
+      {setDefault.isError && <div className="p-4 lg:col-span-2"><ErrorBanner error={setDefault.error} onDismiss={() => setDefault.reset()} /></div>}
     </div>
   );
 }

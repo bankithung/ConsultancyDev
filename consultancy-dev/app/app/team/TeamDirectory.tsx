@@ -25,7 +25,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Modal } from '@/components/common/Modal';
 import { PaginationBar } from '@/components/common/PaginationBar';
 import { EmptyState, ErrorBanner, ErrorState, InlineSpinner, LoadingState } from '@/components/common/states';
-import { ALL_ROLES, ROLE_LABELS } from '@/components/rbac/roles';
+import { ALL_ROLES, ROLE_LABELS, assignableRoles } from '@/components/rbac/roles';
 import { useCurrentRole } from '@/components/rbac/useCurrentRole';
 import { apiClient } from '@/lib/apiClient';
 import { getApiFieldErrors } from '@/lib/api';
@@ -90,7 +90,7 @@ function branchIsRequired(role: Role): boolean {
 
 /** A platform admin belongs to no company, so no branch can be picked. */
 function branchApplies(role: Role): boolean {
-  return role !== 'DEV_ADMIN';
+  return role !== 'DEV_ADMIN' && role !== 'HEAD_MANAGER';
 }
 
 /** Radix Select forbids an empty item value, so "no branch" needs a sentinel. */
@@ -461,6 +461,10 @@ export function TeamDirectory() {
         last_name: payload.last_name.trim(),
         phone: payload.phone.trim(),
       };
+      if (canManage) {
+        body.role = payload.role;
+        body.branch = branchId;
+      }
       if (payload.password) {
         body.password = payload.password;
       }
@@ -556,7 +560,7 @@ export function TeamDirectory() {
       return 'The two passwords do not match.';
     }
     if (
-      isCreating && canManage &&
+      canManage &&
       branchIsRequired(candidate.role) &&
       candidate.branch === NO_BRANCH
     ) {
@@ -993,22 +997,30 @@ export function TeamDirectory() {
             </div>
           </section>
 
-          {isCreating && canManage ? (
+          {canManage && (
             <section className="space-y-2 border-t border-slate-100 pt-5">
-              <Label htmlFor="user-branch">Initial branch *</Label>
-              <Select value={form.branch} onValueChange={(branch) => setForm({ ...form, branch })}>
+              <Label htmlFor="user-role">Role</Label>
+              <Select value={form.role} disabled={saveMutation.isPending} onValueChange={(value) => setForm({ ...form, role: value as Role })}>
+                <SelectTrigger id="user-role"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[...new Set([...assignableRoles(me?.role), ...(editing ? [toRole(editing.role)] : [])])].map((role) => <SelectItem key={role} value={role}>{ROLE_LABELS[role]}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {fieldErrors.role && <p className="text-xs text-red-600">{fieldErrors.role}</p>}
+              {form.role === 'HEAD_MANAGER' ? <p className="text-xs text-slate-500">Oversees all company branches.</p> : branchApplies(form.role) && <>
+              <Label htmlFor="user-branch">Branch{branchIsRequired(form.role) ? ' *' : ''}</Label>
+              <Select value={form.branch} disabled={saveMutation.isPending} onValueChange={(branch) => setForm({ ...form, branch })}>
                 <SelectTrigger id="user-branch"><SelectValue placeholder="Choose a branch" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={NO_BRANCH} disabled>Choose a branch</SelectItem>
-                  {branches.filter((branch) => branch.is_active).map((branch) => <SelectItem key={branch.id} value={String(branch.id)}>{branch.name}</SelectItem>)}
+                  <SelectItem value={NO_BRANCH} disabled={branchIsRequired(form.role)}>{branchIsRequired(form.role) ? 'Choose a branch' : 'Not assigned'}</SelectItem>
+                  {branches.filter((branch) => branch.is_active || branch.id === editing?.branch).map((branch) => <SelectItem key={branch.id} value={String(branch.id)}>{branch.name}</SelectItem>)}
                 </SelectContent>
               </Select>
               {branchQuery.isError && <ErrorBanner error={branchQuery.error} />}
               {fieldErrors.branch && <p className="text-xs text-red-600">{fieldErrors.branch}</p>}
-              <p className="text-xs text-slate-500">New members start as employees. Set roles and reporting lines in <Link className="text-teal-700 underline" href="/app/team?tab=branches">Branches</Link>.</p>
+              </>}
+              {editing && (form.role !== editing.role || (branchApplies(form.role) ? form.branch : NO_BRANCH) !== String(editing.branch ?? NO_BRANCH)) && <p className="text-xs text-amber-700">Changing role or branch signs this member out.</p>}
             </section>
-          ) : (
-            <p className="border-t border-slate-100 pt-4 text-xs text-slate-500">Manage roles and assignments in <Link className="text-teal-700 underline" href="/app/team?tab=branches">Branches</Link>.</p>
           )}
 
           {/*

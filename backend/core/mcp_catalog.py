@@ -85,6 +85,11 @@ PERMISSION_RULES = {
 # the tool name the MCP server exposes, the request body and the response.
 # Keyed by (router prefix, action method name).
 ACTION_OVERLAY = {
+    ('branches', 'set_default'): {
+        'tool_name': 'set_default_branch',
+        'description': 'Make an active branch the company default. Company administrators only. Replaces the previous default without moving members or records.',
+        'body': {}, 'response': 'Branch object', 'idempotent': True,
+    },
     ('users', 'me'): {
         'tool_name': 'get_me', 'description': 'The calling user (UserSerializer).',
         'body': {}, 'response': 'User object',
